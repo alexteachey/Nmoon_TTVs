@@ -60,7 +60,7 @@ try:
 		sims = np.array(summaryfile['sim'])
 		show_individual_plots = input('Do you want to show individual system plots? y/n: ')
 		sim_obs_summary = open(projectdir+'/simulated_observations.csv', mode='w')
-		sim_obs_summary.write('sim,Pplan_days,ntransits,TTV_rmsamp_sec,TTVperiod_epochs,peak_power,fit_sineamp,deltaBIC\n')
+		sim_obs_summary.write('sim,Pplan_days,ntransits,TTV_rmsamp_sec,TTVperiod_epochs,peak_power,fit_sineamp,deltaBIC,MEGNO,SPOCK_prob\n')
 		sim_obs_summary.close()
 
 
@@ -172,8 +172,8 @@ try:
 			#### WRITE OUT THIS INFORMATION TO THE SIMULATION OBSERVATIONS SUMMARY FILE !!!! THESE CAN BEN ANN INPUTS.
 			if plot_individual == 'n':
 				sim_obs_summary = open(projectdir+'/simulated_observations.csv', mode='a')
-				#sim_obs_summary.write('sim,Pplan_days,ntransits,TTV_rmsamp_sec,TTVperiod_epochs,peak_power,fit_sineamp,deltaBIC\n')
-				sim_obs_summary.write(str(sim)+','+str(sim_Pplan_days)+','+str(sim_ntransits)+','+str(sim_TTV_rmsamp)+','+str(sim_TTV_epochs)+','+str(peak_power)+','+str(popt[0])+','+str(deltaBIC)+'\n')
+				#sim_obs_summary.write('sim,Pplan_days,ntransits,TTV_rmsamp_sec,TTVperiod_epochs,peak_power,fit_sineamp,deltaBIC,MEGNO,SPOCK_prob\n')
+				sim_obs_summary.write(str(sim)+','+str(sim_Pplan_days)+','+str(sim_ntransits)+','+str(sim_TTV_rmsamp)+','+str(sim_TTV_epochs)+','+str(peak_power)+','+str(popt[0])+','+str(deltaBIC)+','+str(sim_MEGNO)+','+str(sim_SPOCKprob)+'\n')
 				sim_obs_summary.close()	
 
 		except:
