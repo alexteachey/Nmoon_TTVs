@@ -1,0 +1,727 @@
+from __future__ import division
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas
+import os 
+import time
+import traceback
+import pickle
+from scipy.optimize import curve_fit
+from astropy.timeseries import LombScargle 
+from scipy.interpolate import interp1d 
+from sklearn.neural_network import MLPClassifier
+from sklearn.ensemble import RandomForestClassifier
+from astropy.constants import R_sun, G, M_sun
+from keras.models import Sequential
+from keras.layers import Dense 
+from keras.utils import to_categorical
+import socket
+from keras.callbacks import EarlyStopping, ModelCheckpoint
+
+callbacks_list = [EarlyStopping(monitor='val_accuracy', patience=5)]
+
+
+
+#### THIS SCRIPT WILL READ IN SIMULATED OBSERVATIONS FOR AN EFFORT AT MIXED DATA CLASSIFICATION / REGRESSION.
+###### THE PROBLEM IS SIMPLE -- based on observations, can we regress the number of moons present?
+######## THE PLAN IS TO UTILIZE *BOTH* numerical values in an Artificial Neural Network, *AND* a CNN for the periodogram.
+########## WITH THIS MIXED DATA NEURAL NETWORK, HOPEFULLY THERE IS ENOUGH INFORMATION TO INFER THE NUMBER OF MOONS.
+############# BUT, THIS IS A HARD PROBLEM. ALL OF THE MOON PERIODICITIES ARE BELOW THE NYQUIST RATE, SO WE ARE ONLY SEEING ALIASES.
+############### THE QUESTION IS, CAN WE INFER THE PRESENCE OF N > 1 FROM THOSE ALIASES?
+
+try:
+	if socket.gethostname() == 'tethys.asiaa.sinica.edu.tw':
+		#projectdir = '/data/tethys/Documents/Projects/NMoon_TTVs'
+		projectdir = '/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs'
+	elif socket.gethostname() == 'Alexs-MacBook-Pro.local':
+		projectdir = '/Users/hal9000/Documents/Projects/Nmoon_TTVsim'
+	else:
+		projectdir = input('Please input the project directory: ')
+
+	positionsdir = projectdir+'/sim_positions'
+	ttvfiledir = projectdir+'/sim_TTVs'
+	LSdir = projectdir+'/sim_periodograms'
+	modeldictdir = projectdir+'/sim_model_settings'
+	plotdir = projectdir+'/sim_plots'
+
+
+	load_simobsdict = input('Do you want to load the simulated observation dictionary? y/n: ')
+
+
+	keras_or_skl = input("Do you want to use 'k'eras or 's'cikit-learn? ")
+	if keras_or_skl == 's':
+		mlp_or_rf = input("Do you want to use a 'm'ulti-layer perceptron, or a 'r'andom forest classifier? ")
+	elif keras_or_skl == 'k':
+		add_CNN = input("Do you want to add in a CNN for the periodogram? y/n: ")
+
+	normalize_data = input('Do you want to normalize the data? (recommended): ')
+	run_second_validation = input('Run second validation? y/n: ')
+	if run_second_validation == 'n': 
+		print('NOTE: code will not be saving the scores and model hyperparameters. Monitor in real time.')
+		time.sleep(5)
+
+
+	if load_simobsdict == 'y':
+		try:
+			simobs_dict = pickle.load(open(projectdir+'/simobs_dictionary.pkl', "rb"))
+			parameter_dict = pickle.load(open(projectdir+'/sim_parameters_dictionary.pkl', 'rb'))
+
+		except:
+			print('could not load simobs_dictionary.pkl. Reading in fresh...')
+			load_simobsdict = 'n' #### unable to load it, will have to read in manually.
+
+	if load_simobsdict == 'n':
+		simobsfile = pandas.read_csv(projectdir+'/simulated_observations.csv')
+		sims = np.array(simobsfile['sim']).astype(int)
+		simobs_columns = simobsfile.columns
+		simobs_dict = {}
+		parameter_dict = {}
+
+		#### first generate the parameter dict, which will be a dictionary listed by column name
+		for col in simobs_columns:
+			parameter_dict[col] = np.array(simobsfile[col])
+
+
+		#### now generate a dictionary indexed by the simulation name -- so you can pair these numbers with the periodograms.
+		for nsim,sim in enumerate(sims):
+			print('reading in sim ', sim)
+			simobs_dict[sim] = {}
+			for col in simobs_columns:
+				if col != 'sim':
+					simobs_dict[sim][col] = np.array(simobsfile[col][nsim])
+
+			#### now load the periodogram! and add it to the same dictionary
+			simobs_dict[sim]['periodogram'] = np.load(LSdir+'/TTVsim'+str(sim)+'_periodogram.npy')
+
+		#### save the dictionaries!
+		pickle.dump(simobs_dict, open(projectdir+'/simobs_dictionary.pkl', 'wb'))	
+		pickle.dump(parameter_dict, open(projectdir+'/sim_parameters_dictionary.pkl', 'wb'))
+
+	### NOW YOU SHOULD HAVE simobs_dict, indexed by simulation number, and parameter_dict, indexed by the parameter name.
+
+
+
+
+
+	#### now let's start with some function definitions that we'll need
+
+	def normalize(array):
+		num = array - np.nanmin(array)
+		denom = np.nanmax(array) - np.nanmin(array)
+		return num / denom 
+
+
+	def build_MLP_inputs(*args, arrays='features'):
+		### we're going to use this function to build a 2-D input_array
+		### in a vertical stack, the shape = (nrows, ncolumns)
+		#### for the MLP classifier, it has to be shape = n_samples, n_features
+		##### that is, each ROW is a training example (sample), and each COLUMN is an input feature.
+		###### what we're going to be LOADING IN, THOUGH, ARE ARRAYS OF FEATURES.
+		###### THE LENGTH WILL BE EQUAL TO THE NUMBER OF SAMPLES (EXAMPLES)
+
+		if arrays == 'features':
+			#### means each array input is something like an array of Mplans, Pplans, etc.
+			outstack = np.zeros(shape=(len(args[0]), len(args)))
+			for narg, arg in enumerate(args):
+				outstack.T[narg] = arg ### transposing so you can index by the column number
+
+		elif arrays == 'examples':
+			#### means each array is a series of features for a single input example. would be weird to do it this way, but I guess you could.
+			outstack = np.zeros(shape=(len(args), len(args[0])))
+			for narg, arg in enumerate(args):
+				outstack[narg] = arg 
+
+		return outstack
+
+
+
+	def MLP_classifier(input_array, target_classifications, hidden_layers=5, neurons_per_layer=100, validation_fraction=0.1):
+		#### input_array should be 2-Dimensional (shape=n_samples, n_features)
+		assert input_array.shape[0] > input_array.shape[1] 
+		#### you're gonna want more examples than features!
+
+		assert len(target_classifications) == input_array.shape[0] ### every input sample should have a corresponding classification output!
+
+		hidden_layer_neuron_list = []
+		for i in np.arange(0,hidden_layers,1):
+			hidden_layer_neuron_list.append(neurons_per_layer)
+		hidden_layer_tuple = tuple(hidden_layer_neuron_list)
+
+		clf = MLPClassifier(solver='lbfgs', alpha=1e-5, hidden_layer_sizes=hidden_layer_tuple, verbose=True, early_stopping=True, validation_fraction=validation_fraction)
+
+		clf.fit(input_array, target_classifications)
+
+		return clf #### outputs the classifier that's ready to take inputs as, inputs.
+
+
+	def RF_classifier(input_array, target_classifications, n_estimators=100, max_depth=10, max_features=5):
+		assert input_array.shape[0] > input_array.shape[1]
+		assert len(target_classifications) == input_array.shape[0]
+
+		clf = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth, max_features=max_features)
+		clf.fit(input_array, target_classifications)
+
+		return clf 
+
+
+	#### DEFINITIONS #####
+	def createModel(nfilters=4, kernel_size=3, pool_size=5, pool_type='avg', strides=2, dropout=0.25, nconv_layers=5, ndense=4, input_shape=None, num_classes=None):
+		"""
+		model = Sequential()
+		for convlayer in np.arange(0,nconv_layers,1):
+			multiplier = 2**convlayer
+			model.add(Conv1D(filters=multiplier*nfilters, kernel_size=tuple([kernel_size]), padding='same', kernel_initializer='orthogonal', activation='relu', input_shape=input_shape)) ### 16 outputs.
+			model.add(Conv1D(filters=multiplier*nfilters, kernel_size=tuple([kernel_size]), padding='same', kernel_initializer='orthogonal', activation='relu'))
+			if pool_type == 'avg':
+				model.add(AveragePooling1D(pool_size=tuple([pool_size]), strides=tuple([strides])))
+			elif pool_type == 'max':
+				model.add(MaxPooling1D(pool_size=tuple([pool_size]), strides=tuple([strides])))	
+
+		model.add(Dropout(dropout))
+		multiplier = 2**(convlayer+1)
+		for denselayer in np.arange(0,ndense,1):
+			model.add(Dense(multiplier*nfilters, activation='relu'))
+
+		model.add(Flatten())
+		model.add(Dense(num_classes, activation='sigmoid'))
+
+		return model
+		"""
+
+		
+
+
+	#### DEFINITIONS END ####
+
+
+
+
+
+
+	##### NOW LET'S START BUILDING THE INPUTS FOR THE ANN AND CNN!
+	sim = np.array(parameter_dict['sim']).astype(int)
+	nmoons = np.array(parameter_dict['Nmoons']).astype(int)
+	Pplan_days = np.array(parameter_dict['Pplan_days']).astype(float)
+	ntransits = np.array(parameter_dict['ntransits']).astype(int)
+	TTV_rmsamp_sec = np.array(parameter_dict['TTV_rmsamp_sec']).astype(float)
+	TTVperiod_epochs = np.array(parameter_dict['TTVperiod_epochs']).astype(float)
+	peak_power = np.array(parameter_dict['peak_power']).astype(float)
+	fit_sineamp = np.array(parameter_dict['fit_sineamp']).astype(float)
+	deltaBIC = np.array(parameter_dict['deltaBIC']).astype(float)
+	MEGNO = np.array(parameter_dict['MEGNO']).astype(float) #### should be around 2 for stable systems!
+	SPOCKprob = np.array(parameter_dict['SPOCK_prob']).astype(float) #### will have NaNs! 
+
+	if add_CNN == 'y':
+		for ns, s in enumerate(sim):
+			simperiodogram = simobs_dict[sim]['periodogram']
+			if ns == 0:
+				periodogram_stack = simperiodogram
+				periodogram_shape = len(simperiodogram)
+			else:
+				periodogram_stack = np.vstack((periodogram_stack, simperiodogram))
+
+
+	##### need to cut this down to ONLY STABLE SYSTEMS!!!!!
+	good_spockprob_idxs = np.where(SPOCKprob >= 0.9)[0]
+	good_SPOCKprob_MEGNOs = MEGNO[good_spockprob_idxs]
+	MEGNO_twosig_lowerlim, MEGNO_twosig_upperlim = np.nanpercentile(good_SPOCKprob_MEGNOs, 2.5), np.nanpercentile(good_SPOCKprob_MEGNOs, 97.5)
+	good_MEGNO_idxs = np.where((MEGNO >= MEGNO_twosig_lowerlim) & (MEGNO <= MEGNO_twosig_upperlim))[0]
+	evidence_for_TTVs_idxs = np.where(deltaBIC <= -2)[0]
+	final_idxs = np.intersect1d(good_MEGNO_idxs, evidence_for_TTVs_idxs)
+
+	if add_CNN == 'y':
+		periodogram_stack = periodogram_stack[final_idxs]
+
+	#### CUTTING DOWN THESE ARRAYS SO THAT THEY ARE ONLY THE STABLE SYSTEMS -- IT MAKES NO SENSE TO TRAIN ON UNSTABLE SYSTEMS!!!!!!
+	sim, nmoons, Pplan_days, ntransits, TTV_rmsamp_sec, TTVperiod_epochs, peak_power, fit_sineamp, deltaBIC, MEGNO, SPOCKprob = sim[final_idxs], nmoons[final_idxs], Pplan_days[final_idxs], ntransits[final_idxs], TTV_rmsamp_sec[final_idxs], TTVperiod_epochs[final_idxs], peak_power[final_idxs], fit_sineamp[final_idxs], deltaBIC[final_idxs], MEGNO[final_idxs], SPOCKprob[final_idxs]
+
+
+
+
+	### now we're going to UPDATE the final_idxs (can use the same code above), to BALANCE THE AND VALIDATION_SET
+	n1s, n2s, n3s, n4s, n5s = 0, 0, 0, 0, 0
+	max_per_category = np.nanmin((len(np.where(nmoons == 1)[0]), len(np.where(nmoons  == 2)[0]), len(np.where(nmoons == 3)[0]), len(np.where(nmoons == 4)[0]), len(np.where(nmoons == 5)[0])))
+
+	final_idxs = []
+	for fidx, moon_num in enumerate(nmoons):
+		if (moon_num == 1) and (n1s < max_per_category):
+			n1s += 1
+			final_idxs.append(fidx)
+		elif (moon_num == 2) and (n2s < max_per_category):
+			n2s += 1
+			final_idxs.append(fidx)
+		elif (moon_num == 3) and (n3s < max_per_category):
+			n3s += 1
+			final_idxs.append(fidx)
+		elif (moon_num == 4) and (n4s < max_per_category):
+			n4s += 1
+			final_idxs.append(fidx)
+
+		elif (moon_num == 5) and (n5s < max_per_category):
+			n5s += 1
+			final_idxs.append(fidx)
+		else:
+			continue
+
+		if (n1s == max_per_category) and (n2s == max_per_category) and (n3s == max_per_category) and (n4s == max_per_category) and (n5s == max_per_category):
+			break
+
+	#### NOW WE HAVE BALANCED TRAINING AND VALIDATION FRACTIONS, NO MATTER WHAT.
+	sim, nmoons, Pplan_days, ntransits, TTV_rmsamp_sec, TTVperiod_epochs, peak_power, fit_sineamp, deltaBIC, MEGNO, SPOCKprob = sim[final_idxs], nmoons[final_idxs], Pplan_days[final_idxs], ntransits[final_idxs], TTV_rmsamp_sec[final_idxs], TTVperiod_epochs[final_idxs], peak_power[final_idxs], fit_sineamp[final_idxs], deltaBIC[final_idxs], MEGNO[final_idxs], SPOCKprob[final_idxs]
+	
+	if add_CNN == 'y':
+		periodogram_stack = periodogram_stack[final_idxs]
+
+	print('# of examples per category (total) = ', max_per_category)
+	time.sleep(5)
+
+
+
+	train_fraction = 0.8
+	validate_fraction = 0.2
+
+	all_idxs = np.arange(0,len(sim),1)
+	np.random.seed(42) #### standardize the shuffle
+	np.random.shuffle(all_idxs) ### shuffle them so they're random order
+	training_idxs = all_idxs[:int(train_fraction*len(all_idxs))]
+	validation_idxs = all_idxs[int(train_fraction*len(all_idxs)):]
+
+
+	if normalize_data == 'n':
+		#MLP_input_array = build_MLP_inputs(planet_masses, planet_periods, TTV_periods, TTV_rms, TTV_snrs)
+		MLP_input_array = build_MLP_inputs(Pplan_days, ntransits, TTV_rmsamp_sec, TTVperiod_epochs, peak_power, fit_sineamp, deltaBIC)
+	
+	elif normalize_data == 'y':
+		normed_Pplan_days = normalize(Pplan_days)
+		normed_ntransits = normalize(ntransits)
+		normed_TTV_rmsamp_sec = normalize(TTV_rmsamp_sec)
+		normed_TTVperiod_epochs = normalize(TTVperiod_epochs)
+		normed_peak_power = normalize(peak_power)
+		normed_fit_sineamp = normalize(fit_sineamp)
+		normed_deltaBIC = normalize(deltaBIC) #### careful with this one! you have positive and negative values!
+		MLP_input_array = build_MLP_inputs(normed_Pplan_days, normed_ntransits, normed_TTV_rmsamp_sec, normed_TTVperiod_epochs, normed_peak_power, normed_fit_sineamp, normed_deltaBIC)		
+
+	hidden_layer_options = np.arange(1,30,1)
+	neurons_per_layer_options = np.arange(10,110,10)
+	n_estimator_options = np.arange(10,110,10)
+	max_depth_options = np.arange(1,21,1)
+	max_features_options = np.arange(2,6,1)
+
+	#### STARTING VALUES -- WILL BE UPDATED DURING THE LOOP!
+	best_hlo = 0 ### hidden layer options
+	best_nplo = 0 ### neurons_per_layer options
+	best_neo = 0 ### best n_estimator options
+	best_mdo = 0  #### best max_depth_options
+	best_mfo = 0 #### best max_features_options
+
+	best_accuracy = 0 
+	best_categorical_accuracy = 0
+	best_n1_accuracy = 0
+	best_n2_accuracy = 0
+	best_n3_accuracy = 0
+	best_n4_accuracy = 0
+	best_n5_accuracy = 0
+
+	total_or_categorical = input("Do you want to optimize 't'otal or 'c'ategorical accuracy? ")
+
+	if keras_or_skl == 'k':
+		MLP_filename = 'keras_MLP_run.csv'
+
+	elif keras_or_skl == 's':
+		if mlp_or_rf == 'm':
+			MLP_filename = 'sklearn_MLP_run.csv'
+		elif mlp_or_rf == 'r':
+			MLP_filename = 'sklearn_RF_run.csv'
+
+	if os.path.exists(MLP_filename):
+		#### open it and read the last hidden layer and neurons_per_layer -- first and second entries
+		MLPfile = pandas.read_csv(projectdir+'/'+MLP_filename)
+		if (keras_or_skl == 'k') or ((keras_or_skl == 's') and (mpl_or_rf == 'm')):
+			last_hl = np.array(MLPfile['num_layers'])[-1]
+			last_npl = np.array(MLPfile['neurons_per_layer'])[-1]
+		elif (keras_or_skl == 's') and (mpl_or_rf == 'r'):
+			last_neo = np.array(MLPfile['num_estimators'])[-1]
+			last_md = np.array(MLPfile['max_depth'])[-1]
+			last_mf = np.array(MLPfile['max_features'])[-1]
+
+
+	else:
+		last_hl = -1
+		last_npl = -1 
+		last_neo = -1
+		last_md = -1
+		last_mf = -1 
+
+		MLPfile = open(projectdir+'/'+MLP_filename, mode='w')
+
+		if (keras_or_skl == 'k') or ((keras_or_skl == 's') and (mpl_or_rf == 'm')):
+			MLPfile.write('num_layers,neurons_per_layer,total_valacc,n1_actual,n1_preds,n1_precision,n1_recall,n2_actual,n2_preds,n2_precision,n2_recall,n3_actual,n3_preds,n3_precision,n3_recall,n4_actual,n4_preds,n4_precision,n4_recall,n5_actual,n5_preds,n5_precision,n5_recall\n')
+		elif (keras_or_skl == 's') and (mpl_or_rf == 'r'):
+			MLPfile.write('num_estimators,max_depth,max_features,total_valacc,n1_actual,n1_preds,n1_precision,n1_recall,n2_actual,n2_preds,n2_precision,n2_recall,n3_actual,n3_preds,n3_precision,n3_recall,n4_actual,n4_preds,n4_precision,n4_recall,n5_actual,n5_preds,n5_precision,n5_recall\n')
+
+
+		MLPfile.close()
+
+
+	if keras_or_skl == 'k': #### keras multilayer perceptron -- takes # hidden layers and #neurons per layer
+		loop1 = hidden_layer_options
+		loop2 = neurons_per_layer_options
+		loop3 = np.array([1])
+
+	elif (keras_or_skl == 's') and (mpl_or_rf == 'm'): #### scikit-learn multilayer perceptron -- takes # hidden layers and #neurons per layer
+		loop1 = hidden_layer_options
+		loop2 = neurons_per_layer_options
+		loop3 = np.array([1])
+
+	elif (keras_or_skl == 's') and (mpl_or_rf == 'r'): #### scikit-learn random forest classifier -- takes # estimators, max depth, and max features.
+		loop1 = n_estimator_options 
+		loop2 = max_depth_options 
+		loop3 = max_features_options
+
+
+	"""
+	START THE MASSIVE LOOP OF HYPERPARAMETERS!!!! 
+	STARTS BELOW.
+	"""
+
+	for l1 in loop1:
+
+		if (keras_or_skl == 'k') or ((keras_or_skl == 's') and (mpl_or_rf == 'm')):
+			hlo = l1 ### hidden layer option 
+			if hlo < last_hl:
+				continue
+
+		elif (keras_or_skl == 's') and (mpl_or_rf == 'r'):
+			neo = l1 ### n_estimator option 
+			if neo < last_neo:
+				continue 
+
+		for l2 in loop2:
+			if (keras_or_skl == 'k') or ((keras_or_skl == 's') and (mpl_or_rf == 'm')):
+				nplo = l2 ### neurons per layer option 
+				if nplo < last_npl:
+					continue
+
+			elif (keras_or_skl == 's') and (mpl_or_rf == 'r'):
+				mdo = l2 ### max_depth option
+				if mdo < last_md:
+					continue 
+
+
+			for l3 in loop3:
+				if (keras_or_skl == 'k') or ((keras_or_skl == 's') and (mpl_or_rf == 'm')):
+					dummy_variable = l3 ### neurons per layer option 
+
+				elif (keras_or_skl == 's') and (mpl_or_rf == 'r'):
+					mfo = l3 ### max_features option
+					if mfo < last_mf:
+						continue 
+
+
+				#### start a new row!
+				MLPfile = open(projectdir+'/'+MLP_filename, mode='a')
+
+				if (keras_or_skl == 'k') or ((keras_or_skl == 's') and (mpl_or_rf == 'm')):
+					print('Number of hidden layers = ', hlo)
+					print('Number of neurons per layer = ', nplo)
+
+				elif (keras_or_skl == 's') and (mpl_or_rf == 'r'):
+					print('Number of estimators = ', neo)
+					print('Maximum depth = ', mdo)
+					print("Maximum features = ", mfo)
+
+
+				#time.sleep(1)
+
+				if keras_or_skl == 's':
+					### calling your own function, which fits the data under the hood.
+					if mpl_or_rf == 'm':
+						#classifier = MLP_classifier(MLP_input_array[training_idxs], nmoons[training_idxs], hidden_layers=hlo, neurons_per_layer=nplo)
+						classifier = MLP_classifier(MLP_input_array[training_idxs], nmoons[training_idxs], hidden_layers=hlo, neurons_per_layer=nplo, validation_fraction=0.1) ### under the hood validation
+					
+					elif mpl_or_rf == 'r':
+						classifier = RF_classifier(MLP_input_array[training_idxs], nmoons[training_idxs]) ### there's no validation fraction for this one
+
+
+				elif keras_or_skl == 'k':
+
+
+					if add_CNN == 'y':
+						ANN_shape = MLP_input_array.shape[1] ### number of features
+						CNN_shape = periodogram_shape
+
+						inputA = Input(shape=tuple([ANN_shape]))
+						inputC = Input(shape=tuple([CNN_shape]))
+
+
+
+
+
+
+
+
+
+
+					elif add_CNN == 'n':
+						model = Sequential()
+						for hlnum in np.arange(0,hlo,1): ### add the hidden layers  
+							#### for every layer you're adding
+							#model.add(Dense(nplo, input_layer=5, activation='relu'))
+							model.add(Dense(nplo, activation='relu'))
+
+						model.add(Dense(6, activation='softmax'))
+
+						model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+						#print("COMPILING!")
+						#model.compile(optimizer='adam', loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True), metrics=['accuracy'])
+						#print("COMPILED.")
+
+						#### train this sucker
+						history = model.fit(x=MLP_input_array[training_idxs], y=nmoons[training_idxs], verbose=1, callbacks=callbacks_list, validation_split=0.2, epochs=100, batch_size=10)
+
+
+
+				if run_second_validation == 'y':
+					### VALIDATE IT!
+
+					nhits = 0
+					nmisses = 0
+					ntotal = 0 
+
+					### categorical accuracy -- maybe optimize this instead!!!!
+
+					###### NOTE: PRECISION = TP / (TP + FP) --> nhits = TP, npreds == TP + FP, so precision = nhits / npreds
+					####### RECALL = TP / TP + FN --> nhits == TP, ntotal = TP + FN so recall = nhits / ntotal.
+
+					n1hits, n1preds, n1total, n1_accuracy = 0, 0, 0, 0 
+					n2hits, n2preds, n2total, n2_accuracy = 0, 0, 0, 0
+					n3hits, n3preds, n3total, n3_accuracy = 0, 0, 0, 0
+					n4hits, n4preds, n4total, n4_accuracy = 0, 0, 0, 0
+					n5hits, n5preds, n5total, n5_accuracy = 0, 0, 0, 0
+
+					for nsample, sample in enumerate(MLP_input_array[validation_idxs]):
+						print('classifying: ')
+						#### make a prediction!
+						actual_num_moons = nmoons[validation_idxs][nsample]
+						
+						if keras_or_skl == 's':
+							
+							if mpl_or_rf == 'm':
+								try:
+									classification = classifier.predict(sample)[0]
+								except:
+									sample = sample.reshape(1,-1)
+									classification = classifier.predict(sample)[0]
+
+							elif mpl_or_rf == 'r':
+								try:
+									classification = classifier.predict(sample)[0]
+								except:
+									sample = sample.reshape(1,-1)
+									classification = classifier.predict(sample)[0]
+
+
+						elif keras_or_skl == 'k':
+							try:
+								#classification = model.predict_classes(sample)[0] ### DEPRECATED
+								classification = int(np.argmax(model.predict(sample), axis=-1))
+							except:
+								sample = sample.reshape(1,-1)
+								#classification = model.predict_classes(sample)[0]
+								classification = int(np.argmax(model.predict(sample), axis=-1))
+
+
+
+						#print('classification: ', classification)
+						if classification == 1:
+							n1preds += 1
+						elif classification == 2:
+							n2preds += 1
+						elif classification == 3:
+							n3preds += 1
+						elif classification == 4:
+							n4preds += 1
+						elif classification == 5:
+							n5preds += 1
+
+						#print('actual: ', actual_num_moons)
+						if classification == actual_num_moons: ### TP
+							print('HIT: '+str(classification)+' classification, actual '+str(actual_num_moons))
+							nhits += 1
+							if actual_num_moons == 1:
+								n1hits += 1
+							elif actual_num_moons == 2:
+								n2hits += 1
+							elif actual_num_moons == 3:
+								n3hits += 1
+							elif actual_num_moons == 4:
+								n4hits += 1
+							elif actual_num_moons == 5:
+								n5hits += 1
+
+							#print('HIT!')
+						else: #### 
+							print("MISS: "+str(classification)+' classification, actual '+str(actual_num_moons))
+							nmisses += 1
+							#print("MISS!")
+
+						if actual_num_moons == 1:
+							n1total += 1
+							n1_accuracy = n1hits / n1total 
+						elif actual_num_moons == 2:
+							n2total += 1
+							n2_accuracy = n2hits / n2total
+						elif actual_num_moons == 3:
+							n3total += 1
+							n3_accuracy = n3hits / n3total 
+						elif actual_num_moons == 4:
+							n4total += 1
+							n4_accuracy = n4hits / n4total
+						elif actual_num_moons == 5:
+							n5total += 1 
+							n5_accuracy = n5hits / n5total 
+
+						ntotal += 1
+
+						running_accuracy = nhits / ntotal
+						running_categorical_accuracy = np.nanmean((n1_accuracy, n2_accuracy, n3_accuracy, n4_accuracy, n5_accuracy))
+
+						##### END OF EXAMPLE LOOP
+
+					try:
+						n1precision = n1hits / n1preds
+						n1recall = n1hits / n1total
+					except:
+						n1precision, n1recall = 0, 0
+
+					try:
+						n2precision = n2hits / n2preds
+						n2recall = n2hits / n2total
+					except:
+						n2precision, n2recall = 0, 0
+
+					try:
+						n3precision = n3hits / n3preds
+						n3recall = n3hits / n3total
+					except:
+						n3precision, n3recall = 0, 0
+
+					try:
+						n4precision = n4hits / n4preds
+						n4recall = n4hits / n4total
+					except:
+						n4precision, n4recall = 0, 0
+
+					try:
+						n5precision = n5hits / n5preds
+						n5recall = n5hits / n5total
+					except:
+						n5precision, n5recall = 0, 0
+
+
+
+
+
+					accuracy = running_accuracy
+					categorical_accuracy = running_categorical_accuracy 
+					print('accuracy = ', accuracy*100)
+					print('categorical accuracy = ', categorical_accuracy*100)
+					print('n1 precision / recall = ', n1precision, n1recall)
+					print('n2 precision / recall = ', n2precision, n2recall)
+					print('n3 precision / recall = ', n3precision, n3recall)
+					print('n4 precision / recall = ', n4precision, n4recall)
+					print('n5 precision / recall = ', n5precision, n5recall)
+
+
+					#### BEST VALUES UPDATES
+					if accuracy > best_accuracy: ### improved 
+						best_accuracy = accuracy 
+						if total_or_categorical == 't':
+							if (keras_or_skl == 'k') or ((keras_or_skl == 's') and (mpl_or_rf == 'm')):
+								best_hlo = hlo 
+								best_nplo = nplo 
+							elif (keras_or_skl == 's') and (mpl_or_rf == 'r'):
+								best_neo = neo 
+								best_mdo = mdo 
+								best_mfo = mfo 
+
+
+					if categorical_accuracy > best_categorical_accuracy: ### improved 
+						best_categorical_accuracy = categorical_accuracy 
+						if total_or_categorical == 'c':
+							if (keras_or_skl == 'k') or ((keras_or_skl == 's') and (mpl_or_rf == 'm')):
+								best_hlo = hlo 
+								best_nplo = nplo 
+							elif (keras_or_skl == 's') and (mpl_or_rf == 'r'):
+								best_neo = neo 
+								best_mdo = mdo 
+								best_mfo = mfo 
+
+					if n1_accuracy > best_n1_accuracy:
+						best_n1_accuracy = n1_accuracy
+					if n2_accuracy > best_n2_accuracy:
+						best_n2_accuracy = n2_accuracy
+					if n3_accuracy > best_n3_accuracy:
+						best_n3_accuracy = n3_accuracy
+					if n4_accuracy > best_n4_accuracy:
+						best_n4_accuracy = n4_accuracy
+					if n5_accuracy > best_n5_accuracy:
+						best_n5_accuracy = n5_accuracy 
+
+		
+					#MLPfile.write('num_layers,neurons_per_layer,total_valacc,n1_actual,n1_preds,n1_precision,n2_recall,n2_actual,n2_preds,n2_precision,n2_recall,n3_actual,n3_preds,n3_precision,n3_recall,n4_actual,n4_preds,n4_precision,n4_recall,n5_actual,n5_preds,n5_precision,n5_recall\n')	
+					if (keras_or_skl == 'k') or ((keras_or_skl == 's') and (mpl_or_rf == 'm')):
+						MLPfile.write(str(hlo)+','+str(nplo)+','+str(accuracy)+','+str(n1total)+','+str(n1preds)+','+str(n1precision)+','+str(n1recall)+','+str(n2total)+','+str(n2preds)+','+str(n2precision)+','+str(n2recall)+','+str(n3total)+','+str(n3preds)+','+str(n3precision)+','+str(n3recall)+','+str(n4total)+','+str(n4preds)+','+str(n4precision)+','+str(n4recall)+','+str(n5total)+','+str(n5preds)+','+str(n5precision)+','+str(n5recall)+'\n')
+
+					elif (keras_or_skl == 's') and (mpl_or_rf == 'r'):
+					#MLPfile.write('num_estimators,max_depth,max_features,total_valacc,n1_actual,n1_preds,n1_precision,n1_recall,n2_actual,n2_preds,n2_precision,n2_recall,n3_actual,n3_preds,n3_precision,n3_recall,n4_actual,n4_preds,n4_precision,n4_recall,n5_actual,n5_preds,n5_precision,n5_recall\n')
+						MLPfile.write(str(neo)+','+str(mdo)+','+str(mfo)+','+str(accuracy)+','+str(n1total)+','+str(n1preds)+','+str(n1precision)+','+str(n1recall)+','+str(n2total)+','+str(n2preds)+','+str(n2precision)+','+str(n2recall)+','+str(n3total)+','+str(n3preds)+','+str(n3precision)+','+str(n3recall)+','+str(n4total)+','+str(n4preds)+','+str(n4precision)+','+str(n4recall)+','+str(n5total)+','+str(n5preds)+','+str(n5precision)+','+str(n5recall)+'\n')
+
+					MLPfile.close()
+
+
+
+				#time.sleep(5)
+
+
+
+
+	print(" ")
+	print(" X X X X X ")
+	print(" SUMMARY ")
+	print(" X X X X X ")
+	print(' ')
+	print('best accuracy so far: ', best_accuracy)
+	print("best categorical accuracy so far: ", best_categorical_accuracy)
+	print('best # hidden layers = ', best_hlo)
+	print('best # neurons per layer = ', best_nplo)
+
+
+
+
+
+
+	raise Exception('this is all you want to do right now.')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+except:
+	traceback.print_exc()
+
+
