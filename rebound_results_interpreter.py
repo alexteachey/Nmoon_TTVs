@@ -15,16 +15,27 @@ from astropy.constants import R_sun, G, M_sun
 from keras.models import Sequential
 from keras.layers import Dense 
 from keras.utils import to_categorical
+import socket
 
 
 #### THIS CODE WILL ANALYZE THE OUTPUTS OF YOUR REBOUND SIMULATIONS FOR THE MULTI-MOON TTV ANALYSIS.
 
-projectdir = '/Users/hal9000/Documents/Projects/Nmoon_TTVsim'
 
-ttvfiledir = projectdir+'/sim_TTVs' #### TTV Files (CSVs)
-positionsdir = projectdir+'/sim_positions' ### position arrays
-modeldictdir = projectdir+'/sim_model_settings' ### contains dictionaries with all the starting values
-LSdir = projectdir+'/sim_periodograms' ### arrays containing periods and powers.
+if socket.gethostname() == 'tethys.asiaa.sinica.edu.tw':
+	#projectdir = '/data/tethys/Documents/Projects/NMoon_TTVs'
+	projectdir = '/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs'
+elif socket.gethostname() == 'Alexs-MacBook-Pro.local':
+	projectdir = '/Users/hal9000/Documents/Projects/Nmoon_TTVsim'
+else:
+	projectdir = input('Please input the project directory: ')
+
+positionsdir = projectdir+'/sim_positions'
+ttvfiledir = projectdir+'/sim_TTVs'
+LSdir = projectdir+'/sim_periodograms'
+modeldictdir = projectdir+'/sim_model_settings'
+plotdir = projectdir+'/sim_plots'
+
+
 
 ### you should really just save every simulation as a pickle! instead of initial conditions and positions. OK, whatev.
 
