@@ -14,7 +14,7 @@ from sklearn.ensemble import RandomForestClassifier
 from astropy.constants import R_sun, G, M_sun
 from keras.models import Sequential, Model
 
-from keras.layers import Dense, BatchNormalization, Conv1D, MaxPooling1D, Activation, Dropout, Flatten, Input
+from keras.layers import Dense, BatchNormalization, Conv1D, MaxPooling1D, AveragePooling1D, Activation, Dropout, Flatten, Input
 from keras.utils import to_categorical
 import socket
 from keras.callbacks import EarlyStopping, ModelCheckpoint
@@ -77,6 +77,11 @@ try:
 		except:
 			print('could not load simobs_dictionary.pkl. Reading in fresh...')
 			load_simobsdict = 'n' #### unable to load it, will have to read in manually.
+
+		try:
+			periodogram_stack = np.load(projectdir+'/periodogram_stack.npy')
+		except:
+			print('COULD NOT LOAD periodogramstack. Will read in fresh.')
 
 	if load_simobsdict == 'n':
 		simobsfile = pandas.read_csv(projectdir+'/simulated_observations.csv')
@@ -208,14 +213,19 @@ try:
 			if convlayer == 0:
 				x = inputs
 			multiplier = 2**convlayer
-			x = Conv1D(filters=multiplier*nfilters, kernel_size=tuple([kernel_size]), padding='same', kernel_initializer='orthogonal')(x) ### 16 outputs.
-			x = Conv1D(filters=multiplier*nfilters, kernel_size=tuple([kernel_size]), padding='same', kernel_initializer='orthogonal')(x)
-			x = Activation("relu")(x)
-			x = BatchNormalization(axis=chanDim)(x)
-			if pool_type == 'avg':
-				x = AveragePooling1D(pool_size=tuple([pool_size]), strides=tuple([strides]))(x)
-			elif pool_type == 'max':
-				x = MaxPooling1D(pool_size=tuple([pool_size]), strides=tuple([strides]))(x)				
+			try:
+				x = Conv1D(filters=multiplier*nfilters, kernel_size=tuple([kernel_size]), padding='same', kernel_initializer='orthogonal')(x) ### 16 outputs.
+				x = Conv1D(filters=multiplier*nfilters, kernel_size=tuple([kernel_size]), padding='same', kernel_initializer='orthogonal')(x)
+				x = Activation("relu")(x)
+				x = BatchNormalization(axis=chanDim)(x)
+				if pool_type == 'avg':
+					x = AveragePooling1D(pool_size=tuple([pool_size]), strides=tuple([strides]))(x)
+				elif pool_type == 'max':
+					x = MaxPooling1D(pool_size=tuple([pool_size]), strides=tuple([strides]))(x)	
+			except:
+				traceback.print_exc(limit=10)
+				print("EXCEPTION OCCURRED IN BUILDING THE CNN. BREAKING THE LOOP.")
+				break			
 
 		x = Flatten()(x)
 		x = Dense(nfilters)(x)
@@ -282,14 +292,21 @@ try:
 	print("N=5: ", len(np.where(nmoons == 5)[0]))
 
 	if add_CNN == 'y':
-		for ns, s in enumerate(sim):
-			print('loading periodogram: ', s)
-			simperiodogram = simobs_dict[s]['periodogram']
-			if ns == 0:
-				periodogram_stack = simperiodogram
-				periodogram_shape = len(simperiodogram)
-			else:
-				periodogram_stack = np.vstack((periodogram_stack, simperiodogram))
+		try:
+			print('periodogram_stack.shape = ', periodogram_stack.shape)
+		except:
+			print("COUD NOT LOAD periodogram_stack. Loading in fresh...")
+
+			nsims = len(simobs_dict.keys())
+			for ns, s in enumerate(sim):
+				if ns == 0:
+					##### create the periodogram_stack
+					periodogram_stack = np.zeros( shape=( nsims, len(simobs_dict[s]['periodogram'][1]) ) )
+				print('loading periodogram: ', s)
+				simperiodogram = simobs_dict[s]['periodogram'][1]
+				periodogram_stack[ns] = simperiodogram 
+
+			np.save(projectdir+'/periodogram_stack.npy', periodogram_stack)
 
 
 	##### need to cut this down to ONLY STABLE SYSTEMS!!!!!
