@@ -14,7 +14,7 @@ from sklearn.ensemble import RandomForestClassifier
 from astropy.constants import R_sun, G, M_sun
 from keras.models import Sequential, Model
 
-from keras.layers import Dense, BatchNormalization, Conv1D, MaxPooling1D, Activation
+from keras.layers import Dense, BatchNormalization, Conv1D, MaxPooling1D, Activation, Dropout, Flatten, Input
 from keras.utils import to_categorical
 import socket
 from keras.callbacks import EarlyStopping, ModelCheckpoint
@@ -142,8 +142,24 @@ try:
 		return outstack
 
 
+	def build_CNN_inputs(data_stack, output_classes):
+		### we're going to use this function to build a 2-D input_array
+		### in a vertical stack, the shape = (nrows, ncolumns)
+		#### for the MLP classifier, it has to be shape = n_samples, n_features
+		##### that is, each ROW is a training example (sample), and each COLUMN is an input feature.
+		###### what we're going to be LOADING IN, THOUGH, ARE ARRAYS OF FEATURES.
+		###### THE LENGTH WILL BE EQUAL TO THE NUMBER OF SAMPLES (EXAMPLES)
+
+		data_stack = np.expand_dims(data_stack, axis=2)
+		output_classes = np.expand_dims(output_classes, axis=1)
+
+		return data_stack, output_classes 
+
+
+
 
 	def MLP_classifier(input_array, target_classifications, hidden_layers=5, neurons_per_layer=100, validation_fraction=0.1):
+		##### SCIKIT-LEARN FRAMEWORK
 		#### input_array should be 2-Dimensional (shape=n_samples, n_features)
 		assert input_array.shape[0] > input_array.shape[1] 
 		#### you're gonna want more examples than features!
@@ -163,6 +179,7 @@ try:
 
 
 	def RF_classifier(input_array, target_classifications, n_estimators=100, max_depth=10, max_features=5):
+		#### SCIKIT-lEARN FRAMEWORK
 		assert input_array.shape[0] > input_array.shape[1]
 		assert len(target_classifications) == input_array.shape[0]
 
@@ -172,31 +189,72 @@ try:
 		return clf 
 
 
+
+
 	#### DEFINITIONS #####
-	def createModel(nfilters=4, kernel_size=3, pool_size=5, pool_type='avg', strides=2, dropout=0.25, nconv_layers=5, ndense=4, input_shape=None, num_classes=None):
-		
-		model = Sequential()
+	def create_CNN(input_array_length, num_mlp_outputs=None, nfilters=4, kernel_size=3, pool_size=5, pool_type='avg', strides=2, dropout=0.25, nconv_layers=5, ndense=4, input_shape=None, regress=False, num_classes=5):
+		#### KERAS FRAMEWORK
+		if num_mlp_outputs == None:
+			num_mlp_outputs = num_classes+1
+
+		#### FOLLOWING THIS TUTORIAL FOR MIXED DATA ANN / CNN: https://www.pyimagesearch.com/2019/02/04/keras-multiple-inputs-and-mixed-data/
+		inputShape = (input_array_length, 1) ####  image is 1D, and there's just one channel (no color information)
+		chanDim = -1
+
+		### define the model input
+		inputs = Input(shape=inputShape)
+
 		for convlayer in np.arange(0,nconv_layers,1):
+			if convlayer == 0:
+				x = inputs
 			multiplier = 2**convlayer
-			model.add(Conv1D(filters=multiplier*nfilters, kernel_size=tuple([kernel_size]), padding='same', kernel_initializer='orthogonal', activation='relu', input_shape=input_shape)) ### 16 outputs.
-			model.add(Conv1D(filters=multiplier*nfilters, kernel_size=tuple([kernel_size]), padding='same', kernel_initializer='orthogonal', activation='relu'))
+			x = Conv1D(filters=multiplier*nfilters, kernel_size=tuple([kernel_size]), padding='same', kernel_initializer='orthogonal')(x) ### 16 outputs.
+			x = Conv1D(filters=multiplier*nfilters, kernel_size=tuple([kernel_size]), padding='same', kernel_initializer='orthogonal')(x)
+			x = Activation("relu")(x)
+			x = BatchNormalization(axis=chanDim)(x)
 			if pool_type == 'avg':
-				model.add(AveragePooling1D(pool_size=tuple([pool_size]), strides=tuple([strides])))
+				x = AveragePooling1D(pool_size=tuple([pool_size]), strides=tuple([strides]))(x)
 			elif pool_type == 'max':
-				model.add(MaxPooling1D(pool_size=tuple([pool_size]), strides=tuple([strides])))	
+				x = MaxPooling1D(pool_size=tuple([pool_size]), strides=tuple([strides]))(x)				
 
-		model.add(Dropout(dropout))
-		multiplier = 2**(convlayer+1)
-		for denselayer in np.arange(0,ndense,1):
-			model.add(Dense(multiplier*nfilters, activation='relu'))
+		x = Flatten()(x)
+		x = Dense(nfilters)(x)
+		x = Activation("relu")(x)
+		x = BatchNormalization(axis=chanDim)(x)
+		x = Dropout(dropout)(x)
 
-		model.add(Flatten())
-		model.add(Dense(num_classes, activation='sigmoid'))
+		x = Dense(num_mlp_outputs)(x)
+		x = Activation("relu")(x)
 
-		return model
+		if regress == True:
+			x = Dense(1, activation="linear")
+		elif regress == False:
+			if num_classes > 2:
+				x = Dense(num_classes+1, activation='softmax')
+			elif num_classes == 2:
+				x = Dense(num_classes, activation='sigmoid')
+
+		model = Model(inputs, x)
+		return model 
 		
 
 
+	def create_MLP(nhidden_layers, neurons_per_layer, regress=False, num_classes=5):
+		model = Sequential()
+		for hlnum in np.arange(0,nhidden_layers,1): ### add the hidden layers  
+			#### for every layer you're adding
+			#model.add(Dense(nplo, input_layer=5, activation='relu'))
+			model.add(Dense(neurons_per_layer, activation='relu'))
+
+		if regress == True:
+			model.add(Dense(1, activation='linear'))
+		elif regress == False:
+			if num_classes > 2:
+				model.add(Dense(num_classes+1, activation='softmax'))
+			elif num_classes == 2:
+				model.add(Dense(num_classes, activation='sigmoid'))
+
+		return model 
 
 
 	#### DEFINITIONS END ####
@@ -337,6 +395,10 @@ try:
 		#MLP_input_array = build_MLP_inputs(planet_masses, planet_periods, TTV_periods, TTV_rms, TTV_snrs)
 		MLP_input_array = build_MLP_inputs(Pplan_days, ntransits, TTV_rmsamp_sec, TTVperiod_epochs, peak_power, fit_sineamp, deltaBIC)
 	
+		if add_CNN == 'y':
+			CNN_input_array = build_CNN_inputs(periodogram_stack, nmoons)
+
+
 	elif normalize_data == 'y':
 		normed_Pplan_days = normalize(Pplan_days)
 		normed_ntransits = normalize(ntransits)
@@ -346,6 +408,10 @@ try:
 		normed_fit_sineamp = normalize(fit_sineamp)
 		normed_deltaBIC = normalize(deltaBIC) #### careful with this one! you have positive and negative values!
 		MLP_input_array = build_MLP_inputs(normed_Pplan_days, normed_ntransits, normed_TTV_rmsamp_sec, normed_TTVperiod_epochs, normed_peak_power, normed_fit_sineamp, normed_deltaBIC)		
+		for periodogram_row in np.arange(0,periodogram_stack.shape[0],1):
+			periodogram_stack[periodogram_row] = normalize(periodogram_stack[periodogram_row])
+		CNN_input_array = build_CNN_inputs(periodogram_stack, nmoons)
+
 
 	hidden_layer_options = np.arange(1,30,1)
 	#neurons_per_layer_options = np.arange(10,110,10)
@@ -492,39 +558,48 @@ try:
 
 				elif keras_or_skl == 'k':
 
-
-					if add_CNN == 'y':
-						ANN_shape = MLP_input_array.shape[1] ### number of features
-						CNN_shape = periodogram_shape
-
-						inputA = Input(shape=tuple([ANN_shape]))
-						inputC = Input(shape=tuple([CNN_shape]))
+					#### FIRST MODEL THE MLP
+					model_MLP = create_MLP(nhidden_layers=hlo, neurons_per_layer=nplo, regress=False, num_classes=5)
 
 
-
-
-
-
-
-
-
-
-					elif add_CNN == 'n':
-						model = Sequential()
-						for hlnum in np.arange(0,hlo,1): ### add the hidden layers  
-							#### for every layer you're adding
-							#model.add(Dense(nplo, input_layer=5, activation='relu'))
-							model.add(Dense(nplo, activation='relu'))
-
-						model.add(Dense(6, activation='softmax'))
-
-						model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-						#print("COMPILING!")
-						#model.compile(optimizer='adam', loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True), metrics=['accuracy'])
-						#print("COMPILED.")
-
+					if add_CNN == 'n':
+						print("MLP compiling...")
+						model_MLP.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+						print('MLP compiled.')
 						#### train this sucker
-						history = model.fit(x=MLP_input_array[training_idxs], y=nmoons[training_idxs], verbose=1, callbacks=callbacks_list, validation_split=0.2, epochs=100, batch_size=10)
+						MLP_history = model_MLP.fit(x=MLP_input_array[training_idxs], y=nmoons[training_idxs], verbose=1, callbacks=callbacks_list, validation_split=0.2, epochs=100, batch_size=10)
+
+					#### ADD IN THE CNN
+					elif add_CNN == 'y':
+
+						#### NOT READY TO COMPILE AND FIT -- we're gonna add in the CNN!
+						array_size = len(simobs_dict[1]['periodogram'])
+
+						#### WILL WANT TO ITERATE ON THIS ARCHITECTURE!!!!
+						model_CNN = create_CNN(input_array_length=array_size, nfilters=4, kernel_size=3, pool_size=5, pool_type='avg', strides=2, dropout=0.25, nconv_layers=5, ndense=4, input_shape=None, regress=False, num_classes=5)
+
+
+						combinedInput = concatenate([model_MLP.output, model_CNN.output])
+
+						#### NOW WE PUT THEM TOGETHER! 
+						x = Dense(6, activation='relu')(combinedInput)
+						if regress_target == 'y':
+							x = Dense(1, activation='linear')(x)
+						elif regress_target == 'n':
+							x = Dense(6, activation='softmax')(x)
+
+
+						final_model = Model(inputs=[model_MLP.input, model_CNN.input], outputs=x)
+						if regress_target == 'n':
+							final_model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+						elif regress_target == 'y':
+							final_model.compile(loss='mean_absolute_percentage_error', optimizer='adam', metrics=['accuracy'])
+
+						final_model.fit(x=[MLP_input_array[training_idxs], CNN_input_array[training_idxs]], y=nmoons[training_idxs], verbose=1, callbacks=callbacks_list, validation_split=0.2, epochs=200, batch_size=10)
+
+
+
+
 
 
 
