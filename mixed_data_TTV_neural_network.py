@@ -12,11 +12,16 @@ from scipy.interpolate import interp1d
 from sklearn.neural_network import MLPClassifier
 from sklearn.ensemble import RandomForestClassifier
 from astropy.constants import R_sun, G, M_sun
-from keras.models import Sequential
-from keras.layers import Dense 
+from keras.models import Sequential, Model
+
+from keras.layers import Dense, BatchNormalization, Conv1D, MaxPooling1D, Activation
 from keras.utils import to_categorical
 import socket
 from keras.callbacks import EarlyStopping, ModelCheckpoint
+
+
+
+
 
 callbacks_list = [EarlyStopping(monitor='val_accuracy', patience=5)]
 
@@ -55,6 +60,7 @@ try:
 		add_CNN = input("Do you want to add in a CNN for the periodogram? y/n: ")
 
 	normalize_data = input('Do you want to normalize the data? (recommended): ')
+	require_TTV_evidence = input('DO you want to require EVIDENCE FOR TTVs (deltaBIC <= -2)? y/n: ')
 	run_second_validation = input('Run second validation? y/n: ')
 	if run_second_validation == 'n': 
 		print('NOTE: code will not be saving the scores and model hyperparameters. Monitor in real time.')
@@ -63,8 +69,10 @@ try:
 
 	if load_simobsdict == 'y':
 		try:
+			print('loading dictionaries....')
 			simobs_dict = pickle.load(open(projectdir+'/simobs_dictionary.pkl', "rb"))
 			parameter_dict = pickle.load(open(projectdir+'/sim_parameters_dictionary.pkl', 'rb'))
+			print('loaded.')
 
 		except:
 			print('could not load simobs_dictionary.pkl. Reading in fresh...')
@@ -166,7 +174,7 @@ try:
 
 	#### DEFINITIONS #####
 	def createModel(nfilters=4, kernel_size=3, pool_size=5, pool_type='avg', strides=2, dropout=0.25, nconv_layers=5, ndense=4, input_shape=None, num_classes=None):
-		"""
+		
 		model = Sequential()
 		for convlayer in np.arange(0,nconv_layers,1):
 			multiplier = 2**convlayer
@@ -186,15 +194,12 @@ try:
 		model.add(Dense(num_classes, activation='sigmoid'))
 
 		return model
-		"""
-
 		
 
 
+
+
 	#### DEFINITIONS END ####
-
-
-
 
 
 
@@ -211,9 +216,17 @@ try:
 	MEGNO = np.array(parameter_dict['MEGNO']).astype(float) #### should be around 2 for stable systems!
 	SPOCKprob = np.array(parameter_dict['SPOCK_prob']).astype(float) #### will have NaNs! 
 
+	print('# of SYSTEMS FOR N MOONS (ORIGINAL): ')
+	print("N=1: ", len(np.where(nmoons == 1)[0]))
+	print("N=2: ", len(np.where(nmoons == 2)[0]))
+	print("N=3: ", len(np.where(nmoons == 3)[0]))
+	print('N=4: ', len(np.where(nmoons == 4)[0]))
+	print("N=5: ", len(np.where(nmoons == 5)[0]))
+
 	if add_CNN == 'y':
 		for ns, s in enumerate(sim):
-			simperiodogram = simobs_dict[sim]['periodogram']
+			print('loading periodogram: ', s)
+			simperiodogram = simobs_dict[s]['periodogram']
 			if ns == 0:
 				periodogram_stack = simperiodogram
 				periodogram_shape = len(simperiodogram)
@@ -227,39 +240,71 @@ try:
 	MEGNO_twosig_lowerlim, MEGNO_twosig_upperlim = np.nanpercentile(good_SPOCKprob_MEGNOs, 2.5), np.nanpercentile(good_SPOCKprob_MEGNOs, 97.5)
 	good_MEGNO_idxs = np.where((MEGNO >= MEGNO_twosig_lowerlim) & (MEGNO <= MEGNO_twosig_upperlim))[0]
 	evidence_for_TTVs_idxs = np.where(deltaBIC <= -2)[0]
-	final_idxs = np.intersect1d(good_MEGNO_idxs, evidence_for_TTVs_idxs)
+	stable_idxs = []
+	
+	#### STABILITY CHECK
+	for idx in np.arange(0,len(sim),1):
+		if (idx in good_spockprob_idxs):
+			stable_idxs.append(idx) #### if SPOCK probability is good, we go with this
+		
+		elif (np.isfinite(SPOCKprob[idx]) == False) and (idx in good_MEGNO_idxs): ### if SPOCK prob is unavailable but the MEGNO is good, we go with this
+			stable_idxs.append(idx) 
+		
+		elif (SPOCKprob[idx] < 0.9) and (idx in good_MEGNO_idxs):
+			continue 
+
+	if require_TTV_evidence == 'y':
+		first_cut_idxs = np.intersect1d(stable_idxs, evidence_for_TTVs_idxs)
+	elif require_TTV_evidence == 'n':
+		first_cut_idxs = stable_idxs 
+
+	print('# of systems left after first cut: ', len(first_cut_idxs))
 
 	if add_CNN == 'y':
-		periodogram_stack = periodogram_stack[final_idxs]
+		periodogram_stack = periodogram_stack[first_cut_idxs]
 
 	#### CUTTING DOWN THESE ARRAYS SO THAT THEY ARE ONLY THE STABLE SYSTEMS -- IT MAKES NO SENSE TO TRAIN ON UNSTABLE SYSTEMS!!!!!!
-	sim, nmoons, Pplan_days, ntransits, TTV_rmsamp_sec, TTVperiod_epochs, peak_power, fit_sineamp, deltaBIC, MEGNO, SPOCKprob = sim[final_idxs], nmoons[final_idxs], Pplan_days[final_idxs], ntransits[final_idxs], TTV_rmsamp_sec[final_idxs], TTVperiod_epochs[final_idxs], peak_power[final_idxs], fit_sineamp[final_idxs], deltaBIC[final_idxs], MEGNO[final_idxs], SPOCKprob[final_idxs]
+	sim, nmoons, Pplan_days, ntransits, TTV_rmsamp_sec, TTVperiod_epochs, peak_power, fit_sineamp, deltaBIC, MEGNO, SPOCKprob = sim[first_cut_idxs], nmoons[first_cut_idxs], Pplan_days[first_cut_idxs], ntransits[first_cut_idxs], TTV_rmsamp_sec[first_cut_idxs], TTVperiod_epochs[first_cut_idxs], peak_power[first_cut_idxs], fit_sineamp[first_cut_idxs], deltaBIC[first_cut_idxs], MEGNO[first_cut_idxs], SPOCKprob[first_cut_idxs]
 
-
+	print('# of SYSTEMS FOR N MOONS (AFTER STABILITY AND MAYBE TTV EVIDENCE REQ): ')
+	print("N=1: ", len(np.where(nmoons == 1)[0]))
+	print("N=2: ", len(np.where(nmoons == 2)[0]))
+	print("N=3: ", len(np.where(nmoons == 3)[0]))
+	print('N=4: ', len(np.where(nmoons == 4)[0]))
+	print("N=5: ", len(np.where(nmoons == 5)[0]))
 
 
 	### now we're going to UPDATE the final_idxs (can use the same code above), to BALANCE THE AND VALIDATION_SET
 	n1s, n2s, n3s, n4s, n5s = 0, 0, 0, 0, 0
-	max_per_category = np.nanmin((len(np.where(nmoons == 1)[0]), len(np.where(nmoons  == 2)[0]), len(np.where(nmoons == 3)[0]), len(np.where(nmoons == 4)[0]), len(np.where(nmoons == 5)[0])))
+	choose_max_per_cat = input('Based on numbers above, do you want to choose how many samples are in each category? y/n: ')
+	if choose_max_per_cat == 'n':
+		max_per_category = np.nanmin((len(np.where(nmoons == 1)[0]), len(np.where(nmoons  == 2)[0]), len(np.where(nmoons == 3)[0]), len(np.where(nmoons == 4)[0]), len(np.where(nmoons == 5)[0])))
+	elif choose_max_per_cat == 'y':
+		max_per_category = int(input('How many systems per category? (balancing is important): '))
+	else:
+		try:
+			max_per_category = int(choose_max_per_cat)
+		except:
+			raise Exception('you did not answer the question correctly.')
 
-	final_idxs = []
+	second_cut_idxs = []
 	for fidx, moon_num in enumerate(nmoons):
 		if (moon_num == 1) and (n1s < max_per_category):
 			n1s += 1
-			final_idxs.append(fidx)
+			second_cut_idxs.append(fidx)
 		elif (moon_num == 2) and (n2s < max_per_category):
 			n2s += 1
-			final_idxs.append(fidx)
+			second_cut_idxs.append(fidx)
 		elif (moon_num == 3) and (n3s < max_per_category):
 			n3s += 1
-			final_idxs.append(fidx)
+			second_cut_idxs.append(fidx)
 		elif (moon_num == 4) and (n4s < max_per_category):
 			n4s += 1
-			final_idxs.append(fidx)
+			second_cut_idxs.append(fidx)
 
 		elif (moon_num == 5) and (n5s < max_per_category):
 			n5s += 1
-			final_idxs.append(fidx)
+			second_cut_idxs.append(fidx)
 		else:
 			continue
 
@@ -267,12 +312,13 @@ try:
 			break
 
 	#### NOW WE HAVE BALANCED TRAINING AND VALIDATION FRACTIONS, NO MATTER WHAT.
-	sim, nmoons, Pplan_days, ntransits, TTV_rmsamp_sec, TTVperiod_epochs, peak_power, fit_sineamp, deltaBIC, MEGNO, SPOCKprob = sim[final_idxs], nmoons[final_idxs], Pplan_days[final_idxs], ntransits[final_idxs], TTV_rmsamp_sec[final_idxs], TTVperiod_epochs[final_idxs], peak_power[final_idxs], fit_sineamp[final_idxs], deltaBIC[final_idxs], MEGNO[final_idxs], SPOCKprob[final_idxs]
+	sim, nmoons, Pplan_days, ntransits, TTV_rmsamp_sec, TTVperiod_epochs, peak_power, fit_sineamp, deltaBIC, MEGNO, SPOCKprob = sim[second_cut_idxs], nmoons[second_cut_idxs], Pplan_days[second_cut_idxs], ntransits[second_cut_idxs], TTV_rmsamp_sec[second_cut_idxs], TTVperiod_epochs[second_cut_idxs], peak_power[second_cut_idxs], fit_sineamp[second_cut_idxs], deltaBIC[second_cut_idxs], MEGNO[second_cut_idxs], SPOCKprob[second_cut_idxs]
 	
 	if add_CNN == 'y':
-		periodogram_stack = periodogram_stack[final_idxs]
+		periodogram_stack = periodogram_stack[second_cut_idxs]
 
 	print('# of examples per category (total) = ', max_per_category)
+	print('total samples available for training and validation: ', max_per_category*5) 
 	time.sleep(5)
 
 
@@ -302,7 +348,8 @@ try:
 		MLP_input_array = build_MLP_inputs(normed_Pplan_days, normed_ntransits, normed_TTV_rmsamp_sec, normed_TTVperiod_epochs, normed_peak_power, normed_fit_sineamp, normed_deltaBIC)		
 
 	hidden_layer_options = np.arange(1,30,1)
-	neurons_per_layer_options = np.arange(10,110,10)
+	#neurons_per_layer_options = np.arange(10,110,10)
+	neurons_per_layer_options = np.array([100])
 	n_estimator_options = np.arange(10,110,10)
 	max_depth_options = np.arange(1,21,1)
 	max_features_options = np.arange(2,6,1)
