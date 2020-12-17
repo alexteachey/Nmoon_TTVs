@@ -56,17 +56,22 @@ try:
 		show_individual_plots = 'y' 
 
 
+
+
+
 	else:
 		sims = np.array(summaryfile['sim'])
 		show_individual_plots = input('Do you want to show individual system plots? y/n: ')
+		fit_TTVs = input('Do you want to fit the TTVs (slow)? y/n: ')
 		sim_obs_summary = open(projectdir+'/simulated_observations.csv', mode='w')
-		sim_obs_summary.write('sim,Pplan_days,ntransits,TTV_rmsamp_sec,TTVperiod_epochs,peak_power,fit_sineamp,deltaBIC,MEGNO,SPOCK_prob\n')
+		sim_obs_summary.write('sim,Nmoons,Pplan_days,ntransits,TTV_rmsamp_sec,TTVperiod_epochs,peak_power,fit_sineamp,deltaBIC,MEGNO,SPOCK_prob\n')
 		sim_obs_summary.close()
 
 
 
 	#### NEW SUMMARY STATISTICS LISTS
 	deltaBIC_list = []
+	max_fractional_delta_rvals = []
 	peak_power_periods_list = []
 	nmoons = np.array(summaryfile['nmoons'])
 	megno_vals = np.array(summaryfile['MEGNO'])
@@ -76,18 +81,27 @@ try:
 		try:
 			print('sim # '+str(sim))
 			#### MODEL INPUTS
+			#dicttime1 = time.time()
 			sim_model_dict = pickle.load(open(modeldictdir+'/TTVsim'+str(sim)+'_system_dictionary.pkl', "rb"))
-			
+			#dicttime2 = time.time()
+			#print('dictionary load time = ', dicttime2 - dicttime1)		
+
 			#### TTV file
+			#ttvtime1 = time.time()
 			sim_TTVs = pandas.read_csv(ttvfiledir+'/TTVsim'+str(sim)+'_TTVs.csv')
 			sim_TTV_epochs = np.array(sim_TTVs['epoch']).astype(int)
 			sim_TTV_OminusC = np.array(sim_TTVs['TTVob']).astype(float)
 			sim_TTV_errors = np.array(sim_TTVs['timing_error']).astype(float)
-
+			#ttvtime2 = time.time()
+			#print('ttv load time =', ttvtime2 - ttvtime1)
 
 			#### PERIODOGRAM OF THE TTVs
+			#periodogramtime1 = time.time()
 			sim_periodogram = np.load(LSdir+'/TTVsim'+str(sim)+'_periodogram.npy')
-			
+			#periodogramtime2 = time.time()
+			#print('periodogram load time = ', periodogramtime2 - periodogramtime1)
+
+
 			sim_xpos = np.load(positionsdir+'/TTVsim'+str(sim)+'_xpos.npy')
 			sim_ypos = np.load(positionsdir+'/TTVsim'+str(sim)+'_ypos.npy')
 			
@@ -124,36 +138,59 @@ try:
 
 
 			#### perform a curve_fit to find amplitude and offset, to be plotted below (and for Delta-BIC -- or just delta X^2)?
-			frequency = 1/peak_power_period
-			def sinewave(tvals, amplitude, offset):
-				return amplitude * np.sin(2*np.pi*frequency*tvals + offset)
+			if fit_TTVs == 'y':
+				frequency = 1/peak_power_period
+				def sinewave(tvals, amplitude, offset):
+					return amplitude * np.sin(2*np.pi*frequency*tvals + offset)
 
-			popt, pcov = curve_fit(sinewave, sim_TTV_epochs, sim_TTV_OminusC, sigma=sim_TTV_errors, bounds=([0, -2*np.pi], [10*sim_TTV_rmsamp, 2*np.pi]))
-			interp_epochs = np.linspace(np.nanmin(sim_TTV_epochs), np.nanmax(sim_TTV_epochs), 1000)
-			sinecurve = sinewave(interp_epochs, *popt)
+				popt, pcov = curve_fit(sinewave, sim_TTV_epochs, sim_TTV_OminusC, sigma=sim_TTV_errors, bounds=([0, -2*np.pi], [10*sim_TTV_rmsamp, 2*np.pi]))
+				interp_epochs = np.linspace(np.nanmin(sim_TTV_epochs), np.nanmax(sim_TTV_epochs), 1000)
+				sinecurve = sinewave(interp_epochs, *popt)
 
-			BIC_flat = BIC(nparams=0, data=sim_TTV_OminusC, model=np.linspace(0,0,len(sim_TTV_OminusC)), error=sim_TTV_errors)
-			BIC_curve = BIC(nparams=2, data=sim_TTV_OminusC, model=sinewave(sim_TTV_epochs,*popt), error=sim_TTV_errors)
+				BIC_flat = BIC(nparams=0, data=sim_TTV_OminusC, model=np.linspace(0,0,len(sim_TTV_OminusC)), error=sim_TTV_errors)
+				BIC_curve = BIC(nparams=2, data=sim_TTV_OminusC, model=sinewave(sim_TTV_epochs,*popt), error=sim_TTV_errors)
 
-			#### we want Delta-BIC to be negative to indicate an improvement!
-			###### Now, BIC_curve is an improvement over BIC_flat if BIC_curve < BIC_flat (even with extra complexity, the model is improved)
-			####### so let deltaBIC = BIC_curve - BIC_flat: if BIC_curve is indeed < BIC_flat, then deltaBIC will be negative. SO:
-			deltaBIC = BIC_curve - BIC_flat
-			deltaBIC_list.append(deltaBIC)
-
-
-			if show_individual_plots == 'y':
-				#### plot the TTVs -- and fit a best fitting SINUSOID BASED ON THE PERIODOGRAM PERIOD?
-				plt.scatter(sim_TTV_epochs, sim_TTV_OminusC, facecolor='LightCoral', edgecolor='k', s=20, zorder=2)
-				plt.errorbar(sim_TTV_epochs, sim_TTV_OminusC, yerr=sim_TTV_errors, ecolor='k', zorder=1, fmt='none')
-				plt.plot(np.linspace(np.nanmin(sim_TTV_epochs), np.nanmax(sim_TTV_epochs), 100), np.linspace(0,0,100), color='k', linestyle='--', zorder=0)
-				plt.plot(interp_epochs, sinecurve, c='r', linestyle=':', linewidth=2)
-				plt.xlabel('Epoch')
-				plt.ylabel('O - C [s]')
-				plt.title(r'$P = $'+str(round(peak_power_period,2))+r' epochs, $N_{S} = $'+str(sim_nmoons)+r', $\Delta \mathrm{BIC} = $'+str(round(deltaBIC, 2)))
-				plt.show()
+				#### we want Delta-BIC to be negative to indicate an improvement!
+				###### Now, BIC_curve is an improvement over BIC_flat if BIC_curve < BIC_flat (even with extra complexity, the model is improved)
+				####### so let deltaBIC = BIC_curve - BIC_flat: if BIC_curve is indeed < BIC_flat, then deltaBIC will be negative. SO:
+				deltaBIC = BIC_curve - BIC_flat
+				deltaBIC_list.append(deltaBIC)
 
 
+				if show_individual_plots == 'y':
+					#### plot the TTVs -- and fit a best fitting SINUSOID BASED ON THE PERIODOGRAM PERIOD?
+					plt.scatter(sim_TTV_epochs, sim_TTV_OminusC, facecolor='LightCoral', edgecolor='k', s=20, zorder=2)
+					plt.errorbar(sim_TTV_epochs, sim_TTV_OminusC, yerr=sim_TTV_errors, ecolor='k', zorder=1, fmt='none')
+					plt.plot(np.linspace(np.nanmin(sim_TTV_epochs), np.nanmax(sim_TTV_epochs), 100), np.linspace(0,0,100), color='k', linestyle='--', zorder=0)
+					plt.plot(interp_epochs, sinecurve, c='r', linestyle=':', linewidth=2)
+					plt.xlabel('Epoch')
+					plt.ylabel('O - C [s]')
+					plt.title(r'$P = $'+str(round(peak_power_period,2))+r' epochs, $N_{S} = $'+str(sim_nmoons)+r', $\Delta \mathrm{BIC} = $'+str(round(deltaBIC, 2)))
+					plt.show()
+
+
+			fractional_delta_rvals = []
+			eccentricity_estimates = [] #### will not be exactly eccentricity, since you're not measuring a single orbit's apoapse and periapse.
+			for i in np.arange(0,sim_xpos.shape[0], 1): 
+				tvals = np.linspace(0,10,10000) 
+				rvals = np.sqrt((sim_xpos[i]**2) + (sim_ypos[i]**2)) 
+				min_rval, max_rval = np.nanmin(rvals), np.nanmax(rvals)
+				delta_r = max_rval - min_rval
+				fractional_delta_r = delta_r / np.nanmean((min_rval, max_rval))
+				fractional_delta_rvals.append(fractional_delta_r)
+				eccentricity_swing = (max_rval - min_rval) / (max_rval + min_rval)
+
+				if show_individual_plots == 'y':
+					plt.plot(tvals, rvals)
+					if i != 0:
+						print('Moon # '+str(i))
+						print('fractional Delta-semimajor axis: ', fractional_delta_r)
+						print('eccentricity swing: ', eccentricity_swing)
+						print(' ')
+					plt.title("MEGNO = "+str(round(sim_MEGNO,2))+r', $P_{\mathrm{spock}} = $'+str(round(sim_SPOCKprob,2)))
+				plt.show()    
+			maximum_fractional_delta_r = np.nanmax(fractional_delta_rvals)
+			max_fractional_delta_rvals.append(maximum_fractional_delta_r)
 
 
 
@@ -173,7 +210,7 @@ try:
 			if plot_individual == 'n':
 				sim_obs_summary = open(projectdir+'/simulated_observations.csv', mode='a')
 				#sim_obs_summary.write('sim,Pplan_days,ntransits,	TTV_rmsamp_sec,TTVperiod_epochs,peak_power,fit_sineamp,deltaBIC,MEGNO,SPOCK_prob\n')
-				sim_obs_summary.write(str(sim)+','+str(sim_Pplan_days)+','+str(sim_ntransits)+','+str(sim_TTV_rmsamp)+','+str(sim_TTVperiod_epochs)+','+str(peak_power)+','+str(popt[0])+','+str(deltaBIC)+','+str(sim_MEGNO)+','+str(sim_SPOCKprob)+'\n')
+				sim_obs_summary.write(str(sim)+','+str(sim_nmoons)+','+str(sim_Pplan_days)+','+str(sim_ntransits)+','+str(sim_TTV_rmsamp)+','+str(sim_TTVperiod_epochs)+','+str(peak_power)+','+str(popt[0])+','+str(deltaBIC)+','+str(sim_MEGNO)+','+str(sim_SPOCKprob)+'\n')
 				sim_obs_summary.close()	
 
 		except:
@@ -185,6 +222,7 @@ try:
 	#### plot Delta-BIC versus MEGNO and SPOCK survival probability
 	deltaBIC_list = np.array(deltaBIC_list)
 	peak_power_periods_list = np.array(peak_power_periods_list)
+	max_fractional_delta_rvals = np.array(max_fractional_delta_rvals)
 
 
 	stable_megno_idxs = np.where((megno_vals >= 1.97) & (megno_vals <= 2.18))[0]
@@ -193,7 +231,17 @@ try:
 	unstable_spockprobs = np.where(spockprobs < 0.9)[0]
 
 
-
+	#### PLOT THE DELTA-rvals against megno and spock probs
+	fig, ax = plt.subplots(2)
+	ax[0].scatter(megno_vals[stable_megno_idxs], max_fractional_delta_rvals[stable_megno_idxs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
+	ax[0].scatter(megno_vals[unstable_megno_idxs], max_fractional_delta_rvals[unstable_megno_idxs], facecolor='LightCoral', edgecolor='k', alpha=0.7, s=20)
+	ax[0].set_xlabel('MEGNO')
+	ax[0].set_ylabel(r'max $(\Delta r / \overline{r})$')
+	ax[1].scatter(spockprobs[stable_spockprobs], max_fractional_delta_rvals[stable_spockprobs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
+	ax[1].scatter(spockprobs[unstable_spockprobs], max_fractional_delta_rvals[unstable_spockprobs], facecolor='LightCoral', edgecolor='k', alpha=0.7, s=20)
+	ax[1].set_xlabel[r'SPOCK $P_{\mathrm{stable}}$']
+	ax[1].set_ylabel(r'max $(\Delta r / \overline{r})$')
+	plt.show()
 
 
 
