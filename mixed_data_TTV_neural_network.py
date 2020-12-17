@@ -6,6 +6,7 @@ import os
 import time
 import traceback
 import pickle
+#from tensorflow import keras
 from scipy.optimize import curve_fit
 from astropy.timeseries import LombScargle 
 from scipy.interpolate import interp1d 
@@ -14,10 +15,24 @@ from sklearn.ensemble import RandomForestClassifier
 from astropy.constants import R_sun, G, M_sun
 from keras.models import Sequential, Model
 
-from keras.layers import Dense, BatchNormalization, Conv1D, MaxPooling1D, AveragePooling1D, Activation, Dropout, Flatten, Input
+from keras.layers import Dense, BatchNormalization, Conv1D, MaxPooling1D, AveragePooling1D, Activation, Dropout, Flatten, Input, concatenate
 from keras.utils import to_categorical
 import socket
 from keras.callbacks import EarlyStopping, ModelCheckpoint
+import sys
+
+
+
+def local_variables_return():
+	exception_type, exception_value, traceback_msg = sys.exc_info()
+	if traceback_msg is not None:
+		previous = traceback_msg
+		current = traceback_msg.tb_next
+		while current is not None:
+			previous = current
+			current = current.tb_next
+		return previous.tb_frame.f_locals
+
 
 
 
@@ -206,6 +221,8 @@ try:
 		inputShape = (input_array_length, 1) ####  image is 1D, and there's just one channel (no color information)
 		chanDim = -1
 
+		print('inputShape = ', inputShape)
+
 		### define the model input
 		inputs = Input(shape=inputShape)
 
@@ -223,7 +240,9 @@ try:
 				elif pool_type == 'max':
 					x = MaxPooling1D(pool_size=tuple([pool_size]), strides=tuple([strides]))(x)	
 			except:
+				local_variables = local_variables_return()
 				traceback.print_exc(limit=10)
+
 				print("EXCEPTION OCCURRED IN BUILDING THE CNN. BREAKING THE LOOP.")
 				break			
 
@@ -237,24 +256,27 @@ try:
 		x = Activation("relu")(x)
 
 		if regress == True:
-			x = Dense(1, activation="linear")
+			x = Dense(1, activation="linear")(x)
 		elif regress == False:
 			if num_classes > 2:
-				x = Dense(num_classes+1, activation='softmax')
+				x = Dense(num_classes+1, activation='softmax')(x)
 			elif num_classes == 2:
-				x = Dense(num_classes, activation='sigmoid')
+				x = Dense(num_classes, activation='sigmoid')(x)
 
 		model = Model(inputs, x)
 		return model 
 		
 
 
-	def create_MLP(nhidden_layers, neurons_per_layer, regress=False, num_classes=5):
+	def create_MLP(nhidden_layers, neurons_per_layer, input_shape, regress=False, num_classes=5):
 		model = Sequential()
 		for hlnum in np.arange(0,nhidden_layers,1): ### add the hidden layers  
 			#### for every layer you're adding
 			#model.add(Dense(nplo, input_layer=5, activation='relu'))
-			model.add(Dense(neurons_per_layer, activation='relu'))
+			if hlnum == 0:
+				model.add(Dense(neurons_per_layer, activation='relu', input_shape=input_shape))
+			else:
+				model.add(Dense(neurons_per_layer, activation='relu'))
 
 		if regress == True:
 			model.add(Dense(1, activation='linear'))
@@ -337,6 +359,27 @@ try:
 
 	if add_CNN == 'y':
 		periodogram_stack = periodogram_stack[first_cut_idxs]
+
+
+	#### BEFORE WE REDUCE THESE SAMPLE SIZES, GENERATE A HISTOGRAM OF 1) number in each group, 2) number stable 3) number good evidence 4) final
+	fig, ax = plt.subplots(4, figsize=(6,10))
+	histbins = np.array([0.5, 1.5, 2.5, 3.5, 4.5, 5.5])
+	n1hist = ax[0].hist(nmoons, bins=histbins, facecolor='Crimson', edgecolor='k')
+	ymax = 1.1*np.nanmax(n1hist[0])
+	ax[0].set_ylabel('Total')
+	ax[0].set_ylim(0,ymax)
+	n2hist = ax[1].hist(nmoons[stable_idxs], bins=histbins, facecolor='Gold', edgecolor='k')
+	ax[1].set_ylabel('Stable')
+	ax[1].set_ylim(0,ymax)
+	n3hist = ax[2].hist(nmoons[evidence_for_TTVs_idxs], bins=histbins, facecolor='SeaGreen', edgecolor='k')
+	ax[2].set_ylabel(r'$\Delta \mathrm{BIC} \leq -2$')
+	ax[2].set_ylim(0,ymax)
+	n4hist = ax[3].hist(nmoons[first_cut_idxs], bins=histbins, facecolor='SlateBlue', edgecolor='k')
+	ax[3].set_ylabel('Stable w/ TTVs')
+	ax[3].set_ylim(0,ymax)
+	ax[3].set_xlabel('# moons')
+	plt.show()
+
 
 	#### CUTTING DOWN THESE ARRAYS SO THAT THEY ARE ONLY THE STABLE SYSTEMS -- IT MAKES NO SENSE TO TRAIN ON UNSTABLE SYSTEMS!!!!!!
 	sim, nmoons, Pplan_days, ntransits, TTV_rmsamp_sec, TTVperiod_epochs, peak_power, fit_sineamp, deltaBIC, MEGNO, SPOCKprob = sim[first_cut_idxs], nmoons[first_cut_idxs], Pplan_days[first_cut_idxs], ntransits[first_cut_idxs], TTV_rmsamp_sec[first_cut_idxs], TTVperiod_epochs[first_cut_idxs], peak_power[first_cut_idxs], fit_sineamp[first_cut_idxs], deltaBIC[first_cut_idxs], MEGNO[first_cut_idxs], SPOCKprob[first_cut_idxs]
@@ -574,9 +617,10 @@ try:
 
 
 				elif keras_or_skl == 'k':
+					regress_target = 'n'
 
 					#### FIRST MODEL THE MLP
-					model_MLP = create_MLP(nhidden_layers=hlo, neurons_per_layer=nplo, regress=False, num_classes=5)
+					model_MLP = create_MLP(nhidden_layers=hlo, neurons_per_layer=nplo, regress=False, num_classes=5, input_shape=tuple([MLP_input_array.shape[1]]))
 
 
 					if add_CNN == 'n':
@@ -612,7 +656,7 @@ try:
 						elif regress_target == 'y':
 							final_model.compile(loss='mean_absolute_percentage_error', optimizer='adam', metrics=['accuracy'])
 
-						final_model.fit(x=[MLP_input_array[training_idxs], CNN_input_array[training_idxs]], y=nmoons[training_idxs], verbose=1, callbacks=callbacks_list, validation_split=0.2, epochs=200, batch_size=10)
+						final_model.fit(x=[MLP_input_array[training_idxs], CNN_input_array[0][training_idxs]], y=nmoons[training_idxs], verbose=1, callbacks=callbacks_list, validation_split=0.2, epochs=200, batch_size=10)
 
 
 
@@ -861,6 +905,7 @@ try:
 
 
 except:
+	local_variables = local_variables_return()
 	traceback.print_exc()
 
 
