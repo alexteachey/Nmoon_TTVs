@@ -229,6 +229,21 @@ try:
 	stable_spockprobs = np.where(spockprobs >= 0.9)[0]
 	unstable_megno_idxs = np.concatenate((np.where(megno_vals < 1.97)[0], np.where(megno_vals > 2.18)[0]))
 	unstable_spockprobs = np.where(spockprobs < 0.9)[0]
+	stable_idxs = []
+
+	#### STABILITY CHECK
+	for idx in np.arange(0,len(megno_vals),1):
+		if (idx in stable_spockprobs):
+			stable_idxs.append(idx) #### if SPOCK probability is good, we go with this
+		
+		elif (np.isfinite(SPOCKprob[idx]) == False) and (idx in stable_megno_idxs): ### if SPOCK prob is unavailable but the MEGNO is good, we go with this
+			stable_idxs.append(idx) 
+		
+		elif (spockprobs[idx] < 0.9) and (idx in stable_megno_idxs):
+			continue 
+	stable_idxs = np.array(stable_idxs)		
+
+
 
 
 	#### PLOT THE DELTA-rvals against megno and spock probs
@@ -290,7 +305,7 @@ try:
 	for moon_number in np.arange(1,6,1):
 		nmoon_idxs = np.where(nmoons == moon_number)[0]
 		good_BIC_idxs = np.where(deltaBIC_list < -2)[0] #### positive evidence for a moon
-		nmoons_stable_idxs = np.intersect1d(nmoon_idxs, stable_megno_idxs)
+		nmoons_stable_idxs = np.intersect1d(nmoon_idxs, stable_idxs)
 		nmoons_stable_good_BIC_idxs = np.intersect1d(nmoons_stable_idxs, good_BIC_idxs)
 		TTV_period_bins = np.arange(2,20,1)
 
