@@ -72,6 +72,7 @@ try:
 	#### NEW SUMMARY STATISTICS LISTS
 	deltaBIC_list = []
 	max_fractional_delta_rvals = []
+	Msats_over_Mps = []
 	peak_power_periods_list = []
 	nmoons = np.array(summaryfile['nmoons'])
 	megno_vals = np.array(summaryfile['MEGNO'])
@@ -123,7 +124,7 @@ try:
 			periods, powers = sim_periodogram
 			peak_power = np.nanmax(powers)
 			peak_power_period = periods[np.argmax(powers)]
-			peak_power_periods_list.append(peak_power_period)
+			#peak_power_periods_list.append(peak_power_period) #### MOVED TO THE END TO KEEP LISTS EVEN
 
 			if show_individual_plots == 'y':
 				#### plot the periodogram
@@ -154,7 +155,7 @@ try:
 				###### Now, BIC_curve is an improvement over BIC_flat if BIC_curve < BIC_flat (even with extra complexity, the model is improved)
 				####### so let deltaBIC = BIC_curve - BIC_flat: if BIC_curve is indeed < BIC_flat, then deltaBIC will be negative. SO:
 				deltaBIC = BIC_curve - BIC_flat
-				deltaBIC_list.append(deltaBIC)
+				#deltaBIC_list.append(deltaBIC) #### MOVED TO THE END -- SO THAT YOUR INDEXING IS OK!
 
 
 				if show_individual_plots == 'y':
@@ -190,7 +191,7 @@ try:
 					plt.title("MEGNO = "+str(round(sim_MEGNO,2))+r', $P_{\mathrm{spock}} = $'+str(round(sim_SPOCKprob,2)))
 				plt.show()    
 			maximum_fractional_delta_r = np.nanmax(fractional_delta_rvals)
-			max_fractional_delta_rvals.append(maximum_fractional_delta_r)
+			#max_fractional_delta_rvals.append(maximum_fractional_delta_r)  ### MOVED TO THE END, TO KEEP LISTS EVEN
 
 
 
@@ -211,20 +212,35 @@ try:
 				sim_obs_summary = open(projectdir+'/simulated_observations.csv', mode='a')
 				#sim_obs_summary.write('sim,Pplan_days,ntransits,	TTV_rmsamp_sec,TTVperiod_epochs,peak_power,fit_sineamp,deltaBIC,MEGNO,SPOCK_prob\n')
 				sim_obs_summary.write(str(sim)+','+str(sim_nmoons)+','+str(sim_Pplan_days)+','+str(sim_ntransits)+','+str(sim_TTV_rmsamp)+','+str(sim_TTVperiod_epochs)+','+str(peak_power)+','+str(popt[0])+','+str(deltaBIC)+','+str(sim_MEGNO)+','+str(sim_SPOCKprob)+'\n')
-				sim_obs_summary.close()	
+				sim_obs_summary.close()
+
+
+			#### PLACE MISCELANEOUS LIST APPENDS DOWN HERE.
+			Msats_over_Mps.append(sim_Msats_over_Mp)
+			deltaBIC_list.append(deltaBIC) #### MOVED TO THE END -- SO THAT YOUR INDEXING IS OK!
+			max_fractional_delta_rvals.append(maximum_fractional_delta_r)  ### MOVED TO THE END, TO KEEP LISTS EVEN
+			peak_power_periods_list.append(peak_power_period)
 
 		except:
+			#### APPENDING NaNs so we can keep all the lists the same length!
+			Msats_over_Mps.append(np.nan)
+			deltaBIC_list.append(np.nan)
+			max_fractional_delta_rvals.append(np.nan) 
+			peak_power_periods_list.append(np.nan)
+
+
 			continue 
 
 
 
-
-	#### plot Delta-BIC versus MEGNO and SPOCK survival probability
+	#### MAKE THE LISTS INTO ARRAYS
 	deltaBIC_list = np.array(deltaBIC_list)
 	peak_power_periods_list = np.array(peak_power_periods_list)
 	max_fractional_delta_rvals = np.array(max_fractional_delta_rvals)
+	Msats_over_Mps = np.array(Msats_over_Mps)
 
 
+	##### DATA CUTS
 	stable_megno_idxs = np.where((megno_vals >= 1.97) & (megno_vals <= 2.18))[0]
 	stable_spockprobs = np.where(spockprobs >= 0.9)[0]
 	unstable_megno_idxs = np.concatenate((np.where(megno_vals < 1.97)[0], np.where(megno_vals > 2.18)[0]))
@@ -236,13 +252,12 @@ try:
 		if (idx in stable_spockprobs):
 			stable_idxs.append(idx) #### if SPOCK probability is good, we go with this
 		
-		elif (np.isfinite(SPOCKprob[idx]) == False) and (idx in stable_megno_idxs): ### if SPOCK prob is unavailable but the MEGNO is good, we go with this
+		elif (np.isfinite(spockprobs[idx]) == False) and (idx in stable_megno_idxs): ### if SPOCK prob is unavailable but the MEGNO is good, we go with this
 			stable_idxs.append(idx) 
 		
 		elif (spockprobs[idx] < 0.9) and (idx in stable_megno_idxs):
 			continue 
 	stable_idxs = np.array(stable_idxs)		
-
 
 
 
@@ -254,22 +269,55 @@ try:
 	ax[0].set_ylabel(r'max $(\Delta r / \overline{r})$')
 	ax[1].scatter(spockprobs[stable_spockprobs], max_fractional_delta_rvals[stable_spockprobs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
 	ax[1].scatter(spockprobs[unstable_spockprobs], max_fractional_delta_rvals[unstable_spockprobs], facecolor='LightCoral', edgecolor='k', alpha=0.7, s=20)
-	ax[1].set_xlabel[r'SPOCK $P_{\mathrm{stable}}$']
+	ax[1].set_xlabel(r'SPOCK $P_{\mathrm{stable}}$')
 	ax[1].set_ylabel(r'max $(\Delta r / \overline{r})$')
 	plt.show()
+
+
+	#### PLOT SPOCK PROBABILITIES AS A FUNCTION OF MSAT_OVER_MP -- color code by number of moons
+	#### break it up by number of moons!
+	for moon_number in np.arange(1,6,1):
+		nmoons_idxs = np.where(nmoons == moon_number)[0]
+		#plt.scatter(Msats_over_Mps[nmoons_stable_idxs], spockprobs[nmoons_stable_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
+		plt.scatter(Msats_over_Mps[nmoons_idxs], spockprobs[nmoons_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
+	plt.xlabel(r'$\frac{\Sigma M_S}{M_P} $')
+	plt.ylabel(r'$P_{\mathrm{stable}}$')
+	plt.xscale('log')
+	plt.legend()
+	plt.tight_layout()
+	plt.show()
+
+
+	##### DO THE SAME AS ABOVE, BUT FOR MEGNO #
+	#### break it up by number of moons!
+	for moon_number in np.arange(1,6,1):
+		nmoons_idxs = np.where(nmoons == moon_number)[0]
+		#plt.scatter(Msats_over_Mps[nmoons_stable_idxs], spockprobs[nmoons_stable_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
+		plt.scatter(Msats_over_Mps[nmoons_idxs], megno_vals[nmoons_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
+	plt.xlabel(r'$\frac{\Sigma \, M_S}{M_P} $')
+	plt.ylabel('MEGNO')
+	plt.xscale('log')
+	plt.yscale('log')
+	plt.legend()
+	plt.tight_layout()
+	plt.show() 
+
+
+
+
 
 
 
 
 	#### plot the inferred periods against the BIC values
-	plt.scatter(peak_power_periods_list[stable_megno_idxs], deltaBIC_list[stable_megno_idxs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
+	plt.scatter(peak_power_periods_list[stable_idxs], deltaBIC_list[stable_idxs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
 	plt.xlabel('TTV period [epochs]')
 	plt.ylabel(r'$\Delta \mathrm{BIC}$')
 	plt.show()
 
 
 	##### DO THE SAME WITH THE TTV RMS AMPLITUDES
-	plt.scatter(np.array(summaryfile['TTV_rmsamp_sec'])[stable_megno_idxs]/60, deltaBIC_list[stable_megno_idxs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
+	plt.scatter(np.array(summaryfile['TTV_rmsamp_sec'])[stable_idxs]/60, deltaBIC_list[stable_idxs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
 	plt.xlabel('TTV r.m.s. [minutes]')
 	plt.ylabel(r'$\Delta \mathrm{BIC}$')
 	plt.show()	
@@ -277,7 +325,7 @@ try:
 
 	##### TTV RMS vs Planet Period
 	Pplans = np.array(summaryfile['Pplan_days']).astype(float)
-	plt.scatter(Pplans[stable_megno_idxs], np.array(summaryfile['TTV_rmsamp_sec'])[stable_megno_idxs]/60, facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
+	plt.scatter(Pplans[stable_idxs], np.array(summaryfile['TTV_rmsamp_sec'])[stable_idxs]/60, facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
 	plt.xlabel(r'$P_P$ [days]')
 	plt.ylabel('TTV r.m.s. [minutes]')
 	plt.show()	
@@ -288,7 +336,7 @@ try:
 	#### break it up by number of moons!
 	for moon_number in np.arange(1,6,1):
 		nmoons_idxs = np.where(nmoons == moon_number)[0]
-		nmoons_stable_idxs = np.intersect1d(nmoons_idxs, stable_megno_idxs)
+		nmoons_stable_idxs = np.intersect1d(nmoons_idxs, stable_idxs)
 		plt.scatter(peak_power_periods_list[nmoons_stable_idxs], deltaBIC_list[nmoons_stable_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
 	plt.plot(np.linspace(2,500,1000), np.linspace(0,0,1000), c='k', linestyle='--')
 	plt.xlabel('TTV period [epochs]')
@@ -300,6 +348,12 @@ try:
 
 
 
+	#### fit exponential curves to these histogram points
+	def TTV_curve(xvals, amplitude, beta):
+		#### returns an function of the form amplitude * np.exp(-xvals / beta)
+		return amplitude * np.exp(-xvals / beta)
+
+
 	fig, ax = plt.subplots(5, sharex=True, figsize=(6,10))
 	histdict = {}
 	for moon_number in np.arange(1,6,1):
@@ -309,6 +363,7 @@ try:
 		nmoons_stable_good_BIC_idxs = np.intersect1d(nmoons_stable_idxs, good_BIC_idxs)
 		TTV_period_bins = np.arange(2,20,1)
 
+
 		print('moon number = ', moon_number)
 		print('# of systems = ', len(nmoon_idxs))
 		print('# of these that are stable = ', len(nmoons_stable_idxs))
@@ -317,6 +372,18 @@ try:
 		
 		histdict['hist'+str(moon_number)] = ax[moon_number-1].hist(peak_power_periods_list[nmoons_stable_good_BIC_idxs], bins=TTV_period_bins, facecolor='DodgerBlue', edgecolor='k', alpha=0.7)
 		ax[moon_number-1].set_ylabel(r'$N = $'+str(moon_number))
+
+		nperbin = histdict['hist'+str(moon_number)][0]
+
+		expo_curve_popt, expo_curve_pcov = curve_fit(TTV_curve, TTV_period_bins[:-1]+0.5, nperbin, bounds=([0.5*np.nanmax(nperbin), 1e-1], [4*np.nanmax(nperbin), 10]))
+		TTV_bins_smooth = np.linspace(TTV_period_bins[0], TTV_period_bins[-1], 1000)
+		TTV_hist_vals = TTV_curve(TTV_bins_smooth, *expo_curve_popt)
+		ax[moon_number-1].plot(TTV_bins_smooth, TTV_hist_vals, c='k', linestyle='--')	
+		ax[moon_number-1].set_ylim(0,1.1*np.nanmax(nperbin))
+		ax[moon_number-1].text(14, 0.95*np.nanmax(nperbin), r'$\propto \mathrm{exp}(-$'+str(round(1/expo_curve_popt[1],2))+r'$\, P_{\mathrm{TTV}})$')
+
+		print('N = '+str(moon_number)+'; y = '+str(round(expo_curve_popt[0],2))+' * e^(-'+str(round(1/expo_curve_popt[1],2))+'x)')
+
 
 	ax[4].set_xlabel('TTV period [epochs]')
 	plt.tight_layout()
@@ -359,11 +426,12 @@ try:
 	for moon_number in np.arange(1,6,1):
 		nmoon_idxs = np.where(nmoons == moon_number)[0]
 		good_BIC_idxs = np.where(deltaBIC_list < -2)[0] #### positive evidence for a moon
-		nmoons_stable_idxs = np.intersect1d(nmoon_idxs, stable_megno_idxs)
+		nmoons_stable_idxs = np.intersect1d(nmoon_idxs, stable_idxs)
 		nmoons_stable_good_BIC_idxs = np.intersect1d(nmoons_stable_idxs, good_BIC_idxs)
 		plt.scatter(np.array(summaryfile['Pplan_days'])[nmoons_stable_good_BIC_idxs], peak_power_periods_list[nmoons_stable_good_BIC_idxs], edgecolor='k', alpha=0.2, s=20, label=str(moon_number))
 	
 	plt.scatter(Pplan_bins+2.5, Pplan_bin_max_TTVs, c='k', alpha=0.5, marker='+', s=20)
+
 
 	#### fit a power law to this
 	def powerlaw(xvals, amplitude, exponent):
@@ -381,6 +449,46 @@ try:
 	plt.legend()
 	plt.tight_layout()
 	plt.show()
+
+
+	#### GENERATE THE SAME PLOT, BUT WITH A GAUSSIAN KERNEL DENSITY ESTIMATOR (COMPARE TO RESULTS FROM "real_planet_TTV_analyzer.py")
+
+	good_BIC_stable_idxs = np.intersect1d(good_BIC_idxs, stable_idxs)
+	P_plans = np.array(summaryfile['Pplan_days'])[good_BIC_stable_idxs]
+	P_TTVs = peak_power_periods_list[good_BIC_stable_idxs]
+	kdestack = np.vstack((P_plans, P_plans))
+
+	gkde = gaussian_kde(kdestack)
+	gkde_points_p, gkde_points_t = [], []
+	for p in np.logspace(np.log10(np.nanmin(P_plans)), np.log10(np.nanmax(P_plans)), 100):
+		for t in np.logspace(np.log10(np.nanmin(P_TTVs)), np.log10(np.nanmax(P_TTVs)), 100):
+			gkde_points_p.append(p)
+			gkde_points_t.append(t)
+
+	gkde_points_p = np.array(gkde_points_p)
+	gkde_points_t = np.array(gkde_points_t)
+
+	gkde_points = np.vstack((gkde_points_p, gkde_points_t))
+
+	gkde_values = gkde.evaluate(gkde_points)
+	gkde_norm_values = (gkde_values - np.nanmin(gkde_values)) / (np.nanmax(gkde_values) - np.nanmin(gkde_values))
+
+	colors = cm.coolwarm(gkde_norm_values)
+
+	plt.scatter(gkde_points_p, gkde_points_t, facecolor=colors, s=100)
+	#plt.show()
+	#plt.scatter(P_plans, P_TTVs, facecolor='DodgerBlue', alpha=0.5, edgecolor='k', s=20)
+	plt.scatter(P_plans, P_TTVs, facecolor='k', alpha=0.5, edgecolor='k', s=5)
+	plt.xlabel('planet period')
+	plt.ylabel('TTV period [epochs]')
+	plt.xscale('log')
+	plt.yscale('log')
+	plt.show()
+
+
+
+
+
 
 
 
@@ -403,7 +511,7 @@ try:
 	plt.show()
 
 	###### HISTOGRAMS
-	######### THE STABLE CASE!!!!!
+	######### THE STABLE CASE!!!!! -- COMPARING DISTRIBUTIONS FOR MEGNO AND SPOCK PROBABILITIES
 	fig, (ax1, ax2) = plt.subplots(2, sharex=True, figsize=(6,10))
 	n1,b1,e1 = ax1.hist(deltaBIC_list[stable_megno_idxs], bins=np.arange(-10,11,1), facecolor='NavajoWhite', edgecolor='k', alpha=1, zorder=1)
 	ax1.plot(np.linspace(np.nanmedian(deltaBIC_list[stable_megno_idxs]),np.nanmedian(deltaBIC_list[stable_megno_idxs]),100), np.linspace(0,1.1*np.nanmax(n1),100), c='k', linestyle='--')
@@ -427,6 +535,29 @@ try:
 
 
 	###### HISTOGRAMS
+	######### THE STABLE CASE!!!!! (COMBINED MEGNO / SPOCK STABLE_IDXs)
+	fig, ax1 = plt.subplots(figsize=(6,6))
+	n1,b1,e1 = ax1.hist(deltaBIC_list[stable_idxs], bins=np.arange(-10,11,1), facecolor='NavajoWhite', edgecolor='k', alpha=1, zorder=1)
+	ax1.plot(np.linspace(np.nanmedian(deltaBIC_list[stable_idxs]),np.nanmedian(deltaBIC_list[stable_idxs]),100), np.linspace(0,1.1*np.nanmax(n1),100), c='k', linestyle='--')
+	all_below_neg2 = np.where(deltaBIC_list[stable_idxs] <= -2)[0]
+	pct_below_neg2 = len(all_below_neg2) / len(stable_idxs)
+
+	ax1.axvspan(-11, 0, alpha=0.2, color='green', zorder=0)
+	ax1.axvspan(0, 11, alpha=0.2, color='red', zorder=0)
+	#ax1.set_ylabel(r'$1.97\leq \mathrm{MEGNO} \leq 2.18$')
+	ax1.set_xlim(-10,10)
+	ax1.set_ylim(0,1.1*np.nanmax(n1))
+	ax1.text(-9, np.nanmax(n1), str(round(pct_below_neg2*100,2))+r'% with $\Delta \mathrm{BIC} \leq -2$')
+
+	ax1.set_xlabel(r'$\Delta \mathrm{BIC}$')
+	ax1.set_title('stable systems')
+	plt.tight_layout()
+	plt.show()
+
+
+
+
+	###### HISTOGRAMS --- COMPARING *UNSTABLE* MEGNO AND SPOCK DISTRIBUTIONS.
 	fig, (ax1, ax2) = plt.subplots(2, sharex=True, figsize=(6,10))
 	n1,b1,e1 = ax1.hist(deltaBIC_list[unstable_megno_idxs], bins=np.arange(-10,11,1), facecolor='NavajoWhite', edgecolor='k', alpha=1, zorder=1)
 	ax1.plot(np.linspace(np.nanmedian(deltaBIC_list[unstable_megno_idxs]),np.nanmedian(deltaBIC_list[unstable_megno_idxs]),100), np.linspace(0,1.1*np.nanmax(n1),100), c='k', linestyle='--')
