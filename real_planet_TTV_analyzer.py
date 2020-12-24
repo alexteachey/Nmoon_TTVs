@@ -207,6 +207,22 @@ try:
 	plt.show()
 
 
+
+	#### SOMETHING IS WEIRD ABOUT THE GKDE -- try a heatmap (hist2d)
+	xbins = np.logspace(np.log10(10), np.log10(np.nanmax(P_plans)), 20)
+	ybins = np.logspace(np.log10(2), np.log10(100), 20)
+	TTV_Pplan_hist2d = np.histogram2d(P_plans, P_TTVs, bins=[xbins, ybins])
+	plt.imshow(TTV_Pplan_hist2d[0].T, origin='lower', cmap=cm.coolwarm, interpolation)
+	plt.xticks(ticks=np.arange(0,len(xbins),5), labels=np.around(np.log10(xbins[::5]),2))
+	plt.yticks(ticks=np.arange(0,len(ybins),5), labels=np.around(np.log10(ybins[::5]), 2))
+	plt.xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	plt.ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
+	plt.tight_layout()
+	plt.show()
+
+
+
+
 except:
 	traceback.print_exc()
 
