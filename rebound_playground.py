@@ -17,9 +17,9 @@ import time
 
 
 """
-This code will simulate Jupiter and its four major moons.
+This code will simulate planets and a system of 1 to 5 moons.
 
-The motivation is to see what happens to the TTVs of Jupiter. What happens to the TTVs of planets hosting two,
+The motivation is to see what happens to the TTVs of planets hosting two,
 three, four major moons? What about resonances? What sort of patterns might we see in the TTVs?
 
 
@@ -41,6 +41,13 @@ def Roche(rsat, mplan, msat):
 def RHill(sma, mplan, mstar):
 	return sma * (mplan / (3*mstar))**(1/3)
 
+def AMDcalc(Mplan_real, msats_real, asats_real, ecc_sats, inc_sats):
+	Lambda_sats = msats_real * np.sqrt(G.value * Mplan_real * asats_real)
+	sqrt_sats = np.sqrt(1 - ecc_sats**2)
+	cosinc_sats = np.cos(inc_sats)
+	argument = Lambda_sats * (1 - (sqrt_sats * cosinc_sats))
+	AMD = np.nansum(argument)
+	return AMD
 
 
 #make_imaginary_system = input('Do you want to make an imaginary system? y/n: ')
@@ -71,9 +78,9 @@ TTV_dir = projectdir+'/sim_TTVs'
 periodogram_dir = projectdir+'/sim_periodograms'
 model_settings_dir = projectdir+'/sim_model_settings'
 plotdir = projectdir+'/sim_plots'
+simpickledir = projectdir+'/sim_pickles'
 
 use_spock_scaling = input('Do you want to scale for SPOCK classifier? (Mp = 1, P_1 = 1, etc)? y/n: ')
-
 
 
 nsystems_made = len(os.listdir(periodogram_dir))
@@ -90,7 +97,7 @@ if os.path.exists(projectdir+'/'+sim_summary_filename):
 else:
 	sim_summaryfile = open(projectdir+'/'+sim_summary_filename, mode='w')
 	### write the columns!
-	colnames = 'sim,nmoons,Pplan_days,ntransits,Mmoons_over_Mplan,TTV_rmsamp_sec,TTVperiod_epochs,MEGNO,SPOCK_survprop\n'
+	colnames = 'sim,nmoons,Pplan_days,ntransits,Mmoons_over_Mplan,TTV_rmsamp_sec,TTVperiod_epochs,MEGNO,SPOCK_survprop,final_AMD\n'
 	sim_summaryfile.write(colnames)
 	sim_summaryfile.close()
 
@@ -208,9 +215,9 @@ try:
 				moon_label = moon_labels[nmoon]
 				moon_mass_kg = np.random.choice(moon_mass_range) ### MODIFY THIS!!!!!
 
-				while (moon_mass_kg > 1e-4*planet_mass_kg) or (moon_mass_kg < 1e-7 * planet_mass_kg):
-					#### draw again!
-					moon_mass_kg = np.random.choice(moon_mass_range)
+				#while (moon_mass_kg > 1e-4*planet_mass_kg) or (moon_mass_kg < 1e-7 * planet_mass_kg):
+				#	#### draw again!
+				#	moon_mass_kg = np.random.choice(moon_mass_range)
 
 				### add to the running total!
 				total_moon_mass_kg += moon_mass_kg
@@ -219,7 +226,21 @@ try:
 				moon_mass_mparent = moon_mass_kg / planet_mass_kg 
 
 				### calculate a moon_radius from forecaster!
-				moon_radius_rearth_median, moon_radius_rearth_plus, moon_radius_rearth_minus = mr.Mstat2R(mean=moon_mass_mearth, std=0.0)
+				try:
+					moon_radius_rearth_median, moon_radius_rearth_plus, moon_radius_rearth_minus = mr.Mstat2R(mean=moon_mass_mearth, std=0.01*moon_mass_mearth)
+				
+				except:
+					total_moon_mass_kg -= moon_mass_kg #### revert back to the previous sum
+					#### draw again!
+					moon_mass_kg = np.random.choice(moon_mass_range)
+
+					### add to the running total!
+					total_moon_mass_kg += moon_mass_kg
+
+					moon_mass_mearth = moon_mass_kg / M_earth.value
+					moon_mass_mparent = moon_mass_kg / planet_mass_kg 		
+					moon_radius_rearth_median, moon_radius_rearth_plus, moon_radius_rearth_minus = mr.Mstat2R(mean=moon_mass_mearth, std=0.01*moon_mass_mearth)			
+
 				moon_radius_rearth = np.random.normal(loc=moon_radius_rearth_median, scale=moon_radius_rearth_plus)
 				moon_radius_meters = moon_radius_rearth * R_earth.value 
 
@@ -236,12 +257,21 @@ try:
 				Roche_meters = Roche(rsat=moon_radius_meters, mplan=planet_mass_kg, msat=moon_mass_kg)
 				Roche_Rp = Roche_meters / planet_radius_meters 
 
-				if nmoon == 0:
-					inner_limit_meters = 1.5*Roche_meters #### initialize with this value, then modify with each subsequent moon
 
-					### place the moon somewhere between Roche (inner limit) and 0.5 * Hill.
-					#### FOR THE FIRST MOON, WANT IT SOMEWHERE INSIDE, SO USE LOGSPACE TO INCREASE SAMPLES AT THE SMALL END.
-					moon_sma_meters = np.random.choice(np.logspace(np.log10(inner_limit_meters), np.log10(0.4895*Plan_Rhill_meters),10000))
+				if nmoon == 0:
+
+					nsections = nmoons 
+					full_range = (0.4895*Plan_Rhill_meters) - Roche_meters ### full size of the stability regime
+					section_range = full_range / nsections  ### the size of each section, based on number of moons
+					section_limits = np.arange(Roche_meters, 0.4895*Plan_Rhill_meters + section_range, section_range)
+					assert len(section_limits) >= nsections + 1 
+					
+					### new December 2020 -- each moon gets a SECTION -- the moon will placed randomly in that section
+					#### the number of sections = the number of moons
+					inner_limit_meters = section_limits[0]*1.5
+					outer_limit_meters = section_limits[1]
+
+					moon_sma_meters = np.random.choice(np.linspace(inner_limit_meters, outer_limit_meters, 10000))
 					moon_sma_Rp = moon_sma_meters / planet_radius_meters 
 
 					### calculate the nominal orbital period based on this moon and the primary only
@@ -253,16 +283,13 @@ try:
 					### this is the first one, you can chill... just catalog it amd move on
 					system_dict[moon_label] = {'m':moon_mass_kg, 'a':moon_sma_meters, 'aRp':moon_sma_Rp, 'e':moon_ecc, 'inc':moon_inc, 'pomega':long_peri, 'f':true_anom, 'P':moon_period_seconds, 'RHill':moon_Rhill_meters}
 					moon_dict[moon_label] = {'m':moon_mass_kg, 'a':moon_sma_meters, 'aRp':moon_sma_Rp, 'e':moon_ecc, 'inc':moon_inc, 'pomega':long_peri, 'f':true_anom, 'P':moon_period_seconds, 'RHill':moon_Rhill_meters}
-					inner_limit_meters = moon_sma_meters 
-					#print('new inner limit = ', inner_limit_meters)
+
 
 				elif nmoon > 0:
 					### FOR EACH SUBSEQUENT MOON!
 
-					#### need to make sure that the Moons can never
 					system_dict_keys = list(system_dict.keys()) 
 					moon_dict_keys = list(moon_dict.keys())
-
 
 					if use_MMR == 'y':
 						### DUMMY VALUES! JUST FOR THE WHILE STATEMENT
@@ -318,9 +345,11 @@ try:
 						moon_dict[moon_label] = {'m':moon_mass_kg, 'a':moon_sma_meters, 'aRp':moon_sma_Rp, 'e':moon_ecc, 'pomega':long_peri, 'f':true_anom, 'inc':moon_inc, 'P':moon_period_seconds, 'RHill':moon_Rhill_meters}
 
 						#### update the inner_limit_meters
-						inner_limit_meters = moon_sma_meters
+						#inner_limit_meters = moon_sma_meters
 
-					else:
+
+
+					elif use_MMR == 'n':
 
 						#### FOR NON-MMR SYSTEMS
 						#print('last inner limit (Rp) = ', inner_limit_meters / planet_radius_meters)
@@ -333,12 +362,11 @@ try:
 						else:
 							unstable = 'n'
 
-						moon_sma_meters = np.random.choice(np.logspace(np.log10(inner_limit_meters), np.log10(0.48985*Plan_Rhill_meters), 10000))
+						moon_sma_meters = np.random.choice(np.linspace(inner_limit_meters, outer_limit_meters, 10000))
 						moon_sma_Rp = moon_sma_meters / planet_radius_meters
 						#print('this moon sma (Rp) = ', moon_sma_Rp)
 						#### update the inner_limit_meters to be the semimajor axis of this moon.
-						inner_limit_meters = moon_sma_meters 
-						#print('new inner limit (Rp) = ', inner_limit_meters / planet_radius_meters)
+
 						if debug_mode == 'y' and slow_it_down == 'y':
 							time.sleep(5)
 
@@ -349,6 +377,19 @@ try:
 						system_dict[moon_label] = {'m':moon_mass_kg, 'a':moon_sma_meters, 'aRp':moon_sma_Rp, 'e':moon_ecc, 'pomega':long_peri, 'f':true_anom, 'inc':moon_inc, 'P':moon_period_seconds, 'RHill':moon_Rhill_meters}
 						moon_dict[moon_label] = {'m':moon_mass_kg, 'a':moon_sma_meters, 'aRp':moon_sma_Rp, 'e':moon_ecc, 'pomega':long_peri, 'f':true_anom, 'inc':moon_inc, 'P':moon_period_seconds, 'RHill':moon_Rhill_meters}
 
+
+
+
+				#### new inner_limit_meters is the moon_sma_meters -- RECOMPUTE
+				inner_limit_meters = moon_sma_meters #### the new inner limit based on the moon just generated above.
+				full_range = (0.4895*Plan_Rhill_meters) - inner_limit_meters  #### the full range of space leftover.
+				section_range = full_range / (nmoons - nmoon) #### the size of each section.
+				section_limits = np.arange(inner_limit_meters, 0.4895*Plan_Rhill_meters + section_range, section_range)
+
+				inner_limit_meters = section_limits[0]*1.5
+				outer_limit_meters = section_limits[1]
+
+
 				print('Moon: ', moon_label)
 				print('Msat / Mplan = ', moon_mass_kg / planet_mass_kg)
 				print('Roche limit (Rp) = ', Roche_Rp)
@@ -357,6 +398,7 @@ try:
 				print(' ')
 			if debug_mode == 'y' and slow_it_down == 'y':
 				time.sleep(10)
+
 
 		if (unstable == 'y') and (enforce_stability == 'y'):
 			print('# created so far = ', nsystems_made)
@@ -439,11 +481,22 @@ try:
 		times = np.linspace(0,run_period_seconds, Noutputs)
 		x = np.zeros((len(particle_list), Noutputs)) ### first index is the particle, second is the timestep *to be plotted*
 		y = np.zeros((len(particle_list), Noutputs)) ### ditto above.
-
-
+		z = np.zeros((len(particle_list), Noutputs)) ##### NEW DECEMBER 2020 -- recording these to track inclination changes.
+		#### record eccentricities and inclinations, too!
+		eccs = np.zeros((len(particle_list)-1, Noutputs)) #### because we don't record for the planet!
+		incs = np.zeros((len(particle_list)-1, Noutputs))
+		smas = np.zeros((len(particle_list)-1, Noutputs))
+		AMDs = np.zeros(shape=Noutputs)
 
 		unstable = 'n' #### initialize under the assumption of stability
+		
+
+
 		for nt,t in enumerate(times):
+
+			#### YOU NEED TO KEEP THIS AS A FOR LOOP, EVEN THOUGH IT'S INEFFICIENT, BECAUSE
+			###### THIS IS WHERE YOU CALCULATE YOUR TRANSIT TIMES!
+
 			try:
 				sim.integrate(t, exact_finish_time=1) ### integrates from previous state to new specified time.
 				#sim.integrator_synchronize() 
@@ -470,44 +523,48 @@ try:
 			#print('t = ', t, ' of ', len(times))
 
 
-
 			#### TEMPORARILY DEACTIVATING THIS AS A TEST.
 			
 			for npart,part in enumerate(particle_list): #### for every particle in the simulation 
 				x[npart][nt] = particles[npart].x
 				y[npart][nt] = particles[npart].y 
+				z[npart][nt] = particles[npart].z #### NEW DECEMBER 2020 
+				
+				if npart != 0: ### particle zero is the planet!
+					eccs[npart-1][nt] = particles[npart].e #### minus one because npart = 1 for moon I, but it's index = 0 for these arrays (saving space).
+					incs[npart-1][nt] = particles[npart].inc
+					smas[npart-1][nt] = particles[npart].a 
 
-				#### test if the moon's radius in a stable regime:
-				"""
-				particle_radius = np.sqrt((x[npart][nt] - x[0][nt])**2 + (y[npart][nt] - y[0][nt])**2)
-
-				if (npart != 0) and ((particle_radius < Roche_meters) or (particle_radius > 0.4895*Plan_Rhill_meters)):
-					try:
-						print('SPOCK stability probability = ', stability_probability)
-						if debug_mode == 'y' and slow_it_down == 'y':
-							time.sleep(5)
-					except:
-						pass
-
-					print('particle radius (meters) = ', particle_radius)
-					print('pct Roche = ', (particle_radius / Roche_meters)*100)
-					print("pct Hill = ", (particle_radius / Plan_Rhill_meters)*100)
-					#sim.remove(index=npart)
-					#### system went unstable!
-					unstable = 'y'
-					print("PARTICLE INSIDE ROCHE OR OUTSIDE HILL.")
-					print(" ")
-					break
-
-				else:
-					unstable = 'n'
-				"""
+					particle_CoM_r = np.sqrt(particles[npart].x**2 + particles[npart].y**2 + particles[npart].z**2)
+					if particle_CoM_r < Roche_meters / system_dict['I']['a']: #### Roche limit normalized by inner semimajor axis.
+						print('moon shredded. Unstable!')
+						unstable = 'y'
+						break
 
 
 			if unstable == 'y':
 				break
 
 
+			### CALCULATE THE ANGULAR MOMENTUM DEFICIT
+			#def AMDcalc(Mplan_real, msats_real, asats_real, ecc_sats, inc_sats):
+			Mplan_real = planet_mass_kg
+			msats_real = []
+			for moonkey in moon_dict.keys():
+				msat_real = moon_dict[moonkey]['m']
+				msats_real.append(msat_real)
+			asats_real = smas.T[nt] * moon_dict['I']['a'] #### needs to be the real value, not the normalized value.
+			ecc_sats = eccs.T[nt]
+			inc_sats = incs.T[nt] 
+			AMD_nt = AMDcalc(Mplan_real=Mplan_real, msats_real=msats_real, asats_real=asats_real, ecc_sats=ecc_sats, inc_sats=inc_sats+(np.pi/2))
+			AMDs[nt] = AMD_nt		
+
+
+
+
+
+
+		"""
 		if enforce_stability == 'y':
 			for npart,part in enumerate(particle_list):
 				rvals = np.sqrt((x[npart] - x[0])**2 + (y[npart] - y[0])**2)
@@ -521,6 +578,7 @@ try:
 						time.sleep(5)
 					plt.close()
 					break
+		"""
 
 		print("MEGNO = ", megno)
 
@@ -551,6 +609,22 @@ try:
 			plt.show()
 			plt.close()
 
+
+
+			fig, (ax1, ax2) = plt.subplots(2, figsize=(6,10))	
+			for npart,part in enumerate(particle_list):
+				if npart != 0:
+					#### plot the eccentricity and inclination changes 
+					ax1.plot(times, incs[npart-1], label=system_labels[npart])
+					ax2.plot(times, eccs[npart-1], label=system_labels[npart])
+			ax1.set_ylabel('inclination')
+			ax2.set_ylabel('eccentricity')
+			ax2.set_xlabel('Time')
+			ax1.legend()
+			ax2.legend()
+			plt.show()
+
+
 		#### OK, let's pull out times based an orbital period of 100 days.
 		### first you want to interpolate the curve, so that you can get a displacement at any point in time.
 		#### OK, but the interp1d function expects a FUNCTION, which you don't have... 
@@ -561,6 +635,7 @@ try:
 
 		transit_x_displacements = []
 		transit_y_displacements = []
+		transit_z_displacements = []
 
 		for nbtt, btt in enumerate(barycenter_transit_times):
 			### find the nearest indices to this time
@@ -581,32 +656,39 @@ try:
 			nearest_times = times[nearest_time_neighbor_idxs]
 			nearest_time_xvals = x[0][nearest_time_neighbor_idxs] ### nearest x values
 			nearest_time_yvals = y[0][nearest_time_neighbor_idxs] ### nearest y values
+			nearest_time_zvals = z[0][nearest_time_neighbor_idxs]
 
 			#### interpolate them!!!
 			nearest_time_xinterper = interp1d(nearest_times, nearest_time_xvals) #### will take xval as arg and return yval
 			nearest_time_yinterper = interp1d(nearest_times, nearest_time_yvals)
+			nearest_time_zinterper = interp1d(nearest_times, nearest_time_zvals)
 
 			interpolated_xval = nearest_time_xinterper(btt) ### precise x at time t
 			interpolated_yval = nearest_time_yinterper(btt) ### precise y at time t
+			interpolated_zval = nearest_time_zinterper(btt)
 
 			if use_spock_scaling == 'y':
 				#### in this case, semimajor axis of moon I is 1, so you need to convert back to meters
 				interpolated_xval_physical_units = interpolated_xval * moon_dict['I']['a']  
 				interpolated_yval_physical_units = interpolated_yval * moon_dict['I']['a']
+				interpolated_zval_physical_units = interpolated_zval * moon_dict['I']['a']
 			else:
 				#### no conversion was made, so you can leave them as is
 				interpolated_xval_physical_units = interpolated_xval
 				interpolated_yval_physical_units = interpolated_yval
+				interpolated_zval_physical_units = interpolated_zval
 
 			#### now our convention is that the swing in the x-direction from CoM is the TTV displacement.
 			#### meanwhile, the observer is considered to be in the -y direction.
 
 			transit_x_displacements.append(interpolated_xval_physical_units)
 			transit_y_displacements.append(interpolated_yval_physical_units)
+			transit_z_displacements.append(interpolated_zval_physical_units)
 
 
 		transit_x_displacements = np.array(transit_x_displacements)
 		transit_y_displacements = np.array(transit_y_displacements)
+		transit_z_displacements = np.array(transit_z_displacements)
 		#print('transit_x_displacements (km) = ', transit_x_displacements/1000)
 		#print('transit_y_displacements (km) = ', transit_y_displacements/1000)
 
@@ -747,8 +829,6 @@ try:
 			plotdir = projectdir+'/plots'
 			"""
 
-
-
 			#### save the system dictionary
 			f = open(model_settings_dir+'/TTVsim'+str(sim_number)+'_system_dictionary.pkl', 'wb')
 			pickle.dump(system_dict,f)
@@ -757,6 +837,11 @@ try:
 			### save the positions arrays! (separately)
 			np.save(positions_dir+'/TTVsim'+str(sim_number)+'_xpos.npy', x)
 			np.save(positions_dir+'/TTVsim'+str(sim_number)+'_ypos.npy', y)
+			np.save(positions_dir+'/TTVsim'+str(sim_number)+'_zpos.npy', z)
+			np.save(positions_dir+'/TTVsim'+str(sim_number)+'_eccs.npy', eccs)
+			np.save(positions_dir+'/TTVsim'+str(sim_number)+'_incs.npy', incs)
+			np.save(positions_dir+'/TTVsim'+str(sim_number)+'_smas.npy', smas)
+			np.save(positions_dir+'/TTVsim'+str(sim_number)+'_AMDs.npy', AMDs)
 
 			### save the TTVs! generate text files for this
 			TTVsimfile = open(TTV_dir+'/TTVsim'+str(sim_number)+'_TTVs.csv', mode='w')
@@ -776,18 +861,20 @@ try:
 			np.save(projectdir+'/running_list_of_derived_TTV_periods.npy', np.array(running_period_list))
 
 
+			#### write to sim_summaryfile!
+			#sim_summaryfile = open(projectdir+'/'+sim_summary_filename, mode='w')
+			### write the columns!
+			#colnames = 'sim,nmoons,Pplan_days,ntransits,Mmoons_over_Mplan,TTV_rmsamp,TTVperiod\n'
+			#sim_summaryfile.write(colnames)
+			TTVobs_RMS = np.sqrt(np.nanmean(adjusted_displacements_seconds**2))
+			Mmoons_over_Mplan = total_moon_mass_kg / planet_mass_kg
+			colvals = str(sim_number)+','+str(int(nmoons))+','+str(Pplan_days)+','+str(len(raw_timings))+','+str(Mmoons_over_Mplan)+','+str(TTVobs_RMS)+','+str(best_LS_period)+','+str(megno)+','+str(stability_probability)+','+str(AMDs[-1])+'\n'
 
-		#### write to sim_summaryfile!
-		#sim_summaryfile = open(projectdir+'/'+sim_summary_filename, mode='w')
-		### write the columns!
-		#colnames = 'sim,nmoons,Pplan_days,ntransits,Mmoons_over_Mplan,TTV_rmsamp,TTVperiod\n'
-		#sim_summaryfile.write(colnames)
-		TTVobs_RMS = np.sqrt(np.nanmean(adjusted_displacements_seconds**2))
-		Mmoons_over_Mplan = total_moon_mass_kg / planet_mass_kg
-		colvals = str(sim_number)+','+str(int(nmoons))+','+str(Pplan_days)+','+str(len(raw_timings))+','+str(Mmoons_over_Mplan)+','+str(TTVobs_RMS)+','+str(best_LS_period)+','+str(megno)+','+str(stability_probability)+'\n'
-		sim_summaryfile = open(projectdir+'/'+sim_summary_filename, mode='a')
-		sim_summaryfile.write(colvals)
-		sim_summaryfile.close()
+			sim_summaryfile = open(projectdir+'/'+sim_summary_filename, mode='a')
+			sim_summaryfile.write(colvals)
+			sim_summaryfile.close()
+
+
 
 		nsystems_made += 1
 		sim_number += 1
