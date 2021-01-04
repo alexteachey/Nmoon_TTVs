@@ -158,7 +158,8 @@ try:
 			planet_mass_mearth = planet_mass_kg / M_earth.value 
 
 			#moon_mass_range = np.linspace(M_europa, M_earth.value, 10000)
-			moon_mass_range = np.linspace(planet_mass_kg*1e-5, planet_mass_kg*1e-2, 10000)			
+			total_moon_mass_range = np.linspace(planet_mass_kg*1e-5, planet_mass_kg*1e-2, 10000) ### new January 2021 -- draw from the total!
+			#moon_mass_range = np.linspace(planet_mass_kg*1e-5, planet_mass_kg*1e-2, 10000)			
 
 			planet_radius_rearth_median, planet_radius_rearth_plus, planet_radius_rearth_minus = mr.Mstat2R(mean=planet_mass_mearth, std=0.0)
 			planet_radius_rearth = np.random.normal(loc=planet_radius_rearth_median, scale=planet_radius_rearth_plus)
@@ -205,32 +206,60 @@ try:
 
 			system_dict['Planet'] = {'m':planet_mass_kg, 'a':None, 'aRp':None, 'e':None, 'inc':None, 'pomega':None, 'f':None, 'P':Pplan_seconds, 'RHill':Plan_Rhill_meters}
 
-			total_moon_mass_kg = 0
-			
-
 			used_ratios = []
+
+			total_moon_mass_kg = np.random.choice(total_moon_mass_range) 
+			pct_pie_left = 100
+
+			print('TOTAL MASS OF THE SATELLITE SYSTEM: '+str(total_moon_mass_kg))
+
+			moon_mass_pcts = np.random.randint(10,90,nmoons)
+			total_moon_fracs = np.nansum(moon_mass_pcts)
+			#### this will almost certainly be > 100%... so while that's the case, take 2% off every value, until you get down to 100%.
+			
+			if total_moon_fracs > 100:
+				#### bring them down to the specified total moon mass
+				while total_moon_fracs > 100:
+					moon_mass_pcts = 0.98 * moon_mass_pcts
+					total_moon_fracs = np.nansum(moon_mass_pcts)
+
+			elif total_moon_fracs < 100:
+				#### bring them up to the specified total moon mass
+				while total_moon_fracs < 100:
+					moon_mass_pcts = 1.02 * moon_mass_pcts
+					total_moon_fracs = np.nansum(moon_mass_pcts)				
+
+
+
 
 			for nmoon in np.arange(0,nmoons,1):
 				### select m, a, e, and inc!
 				moon_label = moon_labels[nmoon]
-				moon_mass_kg = np.random.choice(moon_mass_range) ### MODIFY THIS!!!!!
+				print('Moon: ', moon_label)
+				#moon_mass_kg = np.random.choice(moon_mass_range) ### MODIFY THIS!!!!!
+				#moon_mass_kg = np.random.choice(total_moon_mass / nmoons) #### NEW JANUARY 2021! 
+				##### EACH MOON MASS CAN BE UP TO 
+				moon_mass_kg = (moon_mass_pcts[nmoon]/100) * total_moon_mass_kg
+				print('moon mass: ', moon_mass_kg)
+				print('pct of total moon mass: ', moon_mass_pcts[nmoon])
 
 				#while (moon_mass_kg > 1e-4*planet_mass_kg) or (moon_mass_kg < 1e-7 * planet_mass_kg):
 				#	#### draw again!
 				#	moon_mass_kg = np.random.choice(moon_mass_range)
 
 				### add to the running total!
-				total_moon_mass_kg += moon_mass_kg
+				#total_moon_mass_kg += moon_mass_kg
 
 				moon_mass_mearth = moon_mass_kg / M_earth.value
 				moon_mass_mparent = moon_mass_kg / planet_mass_kg 
 
 				### calculate a moon_radius from forecaster!
-				try:
-					moon_radius_rearth_median, moon_radius_rearth_plus, moon_radius_rearth_minus = mr.Mstat2R(mean=moon_mass_mearth, std=0.01*moon_mass_mearth)
+				#try:
+				moon_radius_rearth_median, moon_radius_rearth_plus, moon_radius_rearth_minus = mr.Mstat2R(mean=moon_mass_mearth, std=0.01*moon_mass_mearth)
 				
+				"""
 				except:
-					total_moon_mass_kg -= moon_mass_kg #### revert back to the previous sum
+					#total_moon_mass_kg -= moon_mass_kg #### revert back to the previous sum
 					#### draw again!
 					moon_mass_kg = np.random.choice(moon_mass_range)
 
@@ -240,7 +269,8 @@ try:
 					moon_mass_mearth = moon_mass_kg / M_earth.value
 					moon_mass_mparent = moon_mass_kg / planet_mass_kg 		
 					moon_radius_rearth_median, moon_radius_rearth_plus, moon_radius_rearth_minus = mr.Mstat2R(mean=moon_mass_mearth, std=0.01*moon_mass_mearth)			
-
+				"""
+	
 				moon_radius_rearth = np.random.normal(loc=moon_radius_rearth_median, scale=moon_radius_rearth_plus)
 				moon_radius_meters = moon_radius_rearth * R_earth.value 
 
