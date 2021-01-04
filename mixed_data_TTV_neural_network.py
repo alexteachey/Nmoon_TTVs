@@ -74,7 +74,7 @@ try:
 	elif keras_or_skl == 'k':
 		add_CNN = input("Do you want to add in a CNN for the periodogram? y/n: ")
 
-	normalize_data = input('Do you want to normalize the data? (recommended): ')
+	normalize_data = input('Do you want to normalize neural network inputs? (recommended): ')
 	require_TTV_evidence = input('DO you want to require EVIDENCE FOR TTVs (deltaBIC <= -2)? y/n: ')
 	run_second_validation = input('Run second validation? y/n: ')
 	if run_second_validation == 'n': 
@@ -332,7 +332,7 @@ try:
 
 
 	##### need to cut this down to ONLY STABLE SYSTEMS!!!!!
-	good_spockprob_idxs = np.where(SPOCKprob >= 0.9)[0]
+	good_spockprob_idxs = np.where(SPOCKprob >= 0.8)[0]
 	good_SPOCKprob_MEGNOs = MEGNO[good_spockprob_idxs]
 	MEGNO_twosig_lowerlim, MEGNO_twosig_upperlim = np.nanpercentile(good_SPOCKprob_MEGNOs, 2.5), np.nanpercentile(good_SPOCKprob_MEGNOs, 97.5)
 	good_MEGNO_idxs = np.where((MEGNO >= MEGNO_twosig_lowerlim) & (MEGNO <= MEGNO_twosig_upperlim))[0]

@@ -80,6 +80,125 @@ try:
 	megno_vals = np.array(summaryfile['MEGNO'])
 	spockprobs = np.array(summaryfile['SPOCK_survprop'])
 
+
+	first_n1, first_n2, first_n3, first_n4, first_n5 = 'n', 'n', 'n', 'n', 'n'
+	highest_number = 1
+	for nsim, sim in enumerate(sims):
+
+		print("sim # =", nsim)
+		try:
+			#### MODEL INPUTS
+			#dicttime1 = time.time()
+			sim_model_dict = pickle.load(open(modeldictdir+'/TTVsim'+str(sim)+'_system_dictionary.pkl', "rb"))
+
+			##### SUMMARY FILE ENTRY
+			sim_sumfile_idx = int(np.where(np.array(summaryfile['sim']) == sim)[0])
+
+			#### grab the summary file information
+			sim_nmoons = np.array(summaryfile['nmoons'])[sim_sumfile_idx]
+			sim_Pplan_days = np.array(summaryfile['Pplan_days'])[sim_sumfile_idx]
+			sim_ntransits = np.array(summaryfile['ntransits'])[sim_sumfile_idx]
+			sim_Msats_over_Mp = np.array(summaryfile['Mmoons_over_Mplan'])[sim_sumfile_idx]
+			sim_TTV_rmsamp = np.array(summaryfile['TTV_rmsamp_sec'])[sim_sumfile_idx]
+			sim_TTVperiod_epochs = np.array(summaryfile['TTVperiod_epochs'])[sim_sumfile_idx]
+			sim_MEGNO = np.array(summaryfile['MEGNO'])[sim_sumfile_idx]
+			sim_SPOCKprob = np.array(summaryfile['SPOCK_survprop'])[sim_sumfile_idx]
+
+			if (sim_nmoons <= 2) and (sim_MEGNO > 1.98) and (sim_MEGNO < 2.16):
+				stable = 'y'
+			elif (sim_nmoons > 2) and (sim_SPOCKprob > 0.8):
+				stable = 'y'
+			else:
+				stable = 'n'
+
+			if stable == 'n':
+				print('UNSTABLE!')
+				continue
+
+
+
+			if (sim_nmoons == 1) and (first_n1 == 'n') and (highest_number == sim_nmoons):
+				first_example = 'y'
+				first_n1 = 'y'
+				highest_number += 1
+			elif (sim_nmoons == 2) and (first_n2 == 'n') and (highest_number == sim_nmoons):
+				first_example = 'y'
+				first_n2 = 'y'
+				highest_number += 1
+			elif (sim_nmoons == 3) and (first_n3 == 'n')and (highest_number == sim_nmoons):
+				first_example = 'y'
+				first_n3 = 'y'
+				highest_number += 1
+			elif (sim_nmoons == 4) and (first_n4 == 'n') and (highest_number == sim_nmoons):
+				first_example = 'y'
+				first_n4 = 'y'
+				highest_number += 1
+			elif (sim_nmoons == 5) and (first_n5 == 'n') and (highest_number == sim_nmoons):
+				first_example = 'y'
+				first_n5 = 'y'
+				highest_number += 1
+			else:
+				first_example = 'n'
+
+			if sim_nmoons == 1:
+				continue #### we don't need to plot them here
+
+
+			sim_masses, sim_mass_ratios, sim_smas, sim_smas_fracHill = [], [], [], []
+			moon_labels = ['I', 'II', 'III', 'IV', 'V']
+			sim_RHill = sim_model_dict['Planet']['RHill']
+			sim_mplan = sim_model_dict['Planet']['m']
+			for moon in np.arange(0,sim_nmoons,1):
+				moon_a, moon_m = sim_model_dict[moon_labels[moon]]['a'], sim_model_dict[moon_labels[moon]]['m']
+				sat_mass_ratio = moon_m / sim_mplan
+				sim_masses.append(moon_m)
+				sim_mass_ratios.append(sat_mass_ratio)
+				sim_smas.append(moon_a)
+				sim_smas_fracHill.append(moon_a / sim_RHill)
+			sim_masses, sim_mass_ratios, sim_smas, sim_smas_fracHill = np.array(sim_masses), np.array(sim_mass_ratios), np.array(sim_smas), np.array(sim_smas_fracHill)
+
+			#plt.scatter(sim_smas_fracHill, np.linspace(nsim,nsim,sim_nmoons), s=np.log10(1/sim_mass_ratios)**2, edgecolor='k', facecolor='DodgerBlue', alpha=0.7)
+
+			colors = cm.inferno(np.linspace(0,1,5))
+			#plt.plot(sim_smas_fracHill, sim_mass_ratios, color=colors[sim_nmoons-1], linewidth=2, zorder=0)
+			#### normalize instead to the mass of satellite 1!
+			if first_example == 'y':
+				plt.plot(sim_smas_fracHill, sim_masses / sim_masses[0], color=colors[sim_nmoons-1], linewidth=2, alpha=0.5, label='N = '+str(sim_nmoons))
+			else:			
+				plt.plot(sim_smas_fracHill, sim_masses / sim_masses[0], color=colors[sim_nmoons-1], linewidth=2, alpha=0.5)
+		except:
+			traceback.print_exc()
+			continue
+
+
+	plt.xlabel(r'$a / R_{\mathrm{Hill}}$')
+	#plt.ylabel(r'$M_S / M_P$')
+	plt.ylabel(r'$M_S / M_{S_1}$')
+	plt.yscale('log')
+	plt.legend()
+	plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 	for sim in sims:
 		try:
 			print('sim # '+str(sim))
@@ -107,6 +226,7 @@ try:
 
 			sim_xpos = np.load(positionsdir+'/TTVsim'+str(sim)+'_xpos.npy')
 			sim_ypos = np.load(positionsdir+'/TTVsim'+str(sim)+'_ypos.npy')
+			sim_zpos = np.load(positionsdir+'/TTVsim'+str(sim)+'_zpos.npy')
 			
 
 			##### SUMMARY FILE ENTRY
@@ -190,7 +310,9 @@ try:
 						print('fractional Delta-semimajor axis: ', fractional_delta_r)
 						print('eccentricity swing: ', eccentricity_swing)
 						print(' ')
-					plt.title("MEGNO = "+str(round(sim_MEGNO,2))+r', $P_{\mathrm{spock}} = $'+str(round(sim_SPOCKprob,2)))
+					plt.xlabel('time')
+					plt.ylabel(r'$R_{CoM}$')
+					plt.title("Moon "+str(i)+", MEGNO = "+str(round(sim_MEGNO,2))+r', $P_{\mathrm{spock}} = $'+str(round(sim_SPOCKprob,2)))
 				plt.show()    
 			maximum_fractional_delta_r = np.nanmax(fractional_delta_rvals)
 			#max_fractional_delta_rvals.append(maximum_fractional_delta_r)  ### MOVED TO THE END, TO KEEP LISTS EVEN
@@ -244,7 +366,7 @@ try:
 
 	##### DATA CUTS
 	stable_megno_idxs = np.where((megno_vals >= 1.97) & (megno_vals <= 2.18))[0]
-	stable_spockprobs = np.where(spockprobs >= 0.9)[0]
+	stable_spockprobs = np.where(spockprobs >= 0.8)[0] #### UPDATE BASED ON DEARTH OF P > 0.9 systems in the new paradigm.
 	unstable_megno_idxs = np.concatenate((np.where(megno_vals < 1.97)[0], np.where(megno_vals > 2.18)[0]))
 	unstable_spockprobs = np.where(spockprobs < 0.9)[0]
 	stable_idxs = []
@@ -377,7 +499,14 @@ try:
 
 		nperbin = histdict['hist'+str(moon_number)][0]
 
+		if np.all(nperbin == 0):
+			continue
+
 		expo_curve_popt, expo_curve_pcov = curve_fit(TTV_curve, TTV_period_bins[:-1]+0.5, nperbin, bounds=([0.5*np.nanmax(nperbin), 1e-1], [4*np.nanmax(nperbin), 10]))
+		#except:
+		#	#### unbounded
+		#	expo_curve_popt, expo_curve_pcov = curve_fit(TTV_curve, TTV_period_bins[:-1]+0.5, nperbin, bounds=([0, 1e-1], [4*np.nanmax(nperbin), 10]))
+
 		TTV_bins_smooth = np.linspace(TTV_period_bins[0], TTV_period_bins[-1], 1000)
 		TTV_hist_vals = TTV_curve(TTV_bins_smooth, *expo_curve_popt)
 		ax[moon_number-1].plot(TTV_bins_smooth, TTV_hist_vals, c='k', linestyle='--')	
