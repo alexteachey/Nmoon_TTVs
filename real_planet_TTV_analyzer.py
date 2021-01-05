@@ -159,6 +159,7 @@ try:
 				plt.scatter(KOI_epochs, KOI_OCs, facecolor='LightCoral', edgecolor='k', alpha=0.7, zorder=2)
 				plt.errorbar(KOI_epochs, KOI_OCs, yerr=KOI_OCerrs, ecolor='k', fmt='none', zorder=1)
 				plt.plot(KOI_epochs_interp, KOI_TTV_interp, color='k', linestyle='--', linewidth=2)
+				plt.plot(KOI_epochs, np.linspace(0,0,len(KOI_epochs)), color='k', linestyle=':', alpha=0.5, zorder=0)
 				plt.xlabel("epoch")
 				plt.ylabel('O - C [min]')
 				plt.title('KOI-'+str(kepoi)+r', $\Delta \mathrm{BIC} = $'+str(round(deltaBIC, 2)))
@@ -209,16 +210,18 @@ try:
 
 
 	#### SOMETHING IS WEIRD ABOUT THE GKDE -- try a heatmap (hist2d)
-	xbins = np.logspace(np.log10(10), np.log10(np.nanmax(P_plans)), 20)
-	ybins = np.logspace(np.log10(2), np.log10(100), 20)
+	xbins = np.logspace(np.log10(10), np.log10(1500), 20) #### consistent with the simulation
+	ybins = np.logspace(np.log10(2), np.log10(100), 20) #### consistent with the simulation
 	TTV_Pplan_hist2d = np.histogram2d(P_plans, P_TTVs, bins=[xbins, ybins])
-	plt.imshow(TTV_Pplan_hist2d[0].T, origin='lower', cmap=cm.coolwarm, interpolation)
+	plt.imshow(TTV_Pplan_hist2d[0].T, origin='lower', cmap=cm.coolwarm)
 	plt.xticks(ticks=np.arange(0,len(xbins),5), labels=np.around(np.log10(xbins[::5]),2))
 	plt.yticks(ticks=np.arange(0,len(ybins),5), labels=np.around(np.log10(ybins[::5]), 2))
 	plt.xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	plt.ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
 	plt.tight_layout()
 	plt.show()
+
+	np.save('/data/tethys/Documents/Projects/NMoon_TTVs/mazeh_PTTV10-1500_Pplan2-100_20x20_heatmap.npy', TTV_Pplan_hist2d)
 
 
 

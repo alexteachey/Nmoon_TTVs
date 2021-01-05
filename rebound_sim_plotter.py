@@ -622,8 +622,8 @@ try:
 
 
 	#### SOMETHING IS WEIRD ABOUT THE GKDE -- try a heatmap (hist2d)
-	xbins = np.logspace(np.log10(10), np.log10(1500), 20)
-	ybins = np.logspace(np.log10(2), np.log10(100), 20)
+	xbins = np.logspace(np.log10(10), np.log10(1500), 20) #### planet periods
+	ybins = np.logspace(np.log10(2), np.log10(100), 20) #### P_TTVs
 	TTV_Pplan_hist2d = np.histogram2d(P_plans, P_TTVs, bins=[xbins, ybins])
 	plt.imshow(TTV_Pplan_hist2d[0].T, origin='lower', cmap=cm.coolwarm)
 	plt.xticks(ticks=np.arange(0,len(xbins),5), labels=np.around(np.log10(xbins[::5]),2))
@@ -633,6 +633,7 @@ try:
 	plt.tight_layout()
 	plt.show()
 
+	np.save('/data/tethys/Documents/Projects/NMoon_TTVs/simulated_PTTV10-1500_Pplan2-100_20x20_heatmap.npy', TTV_Pplan_hist2d)
 
 
 
