@@ -156,6 +156,10 @@ try:
 				sim_smas.append(moon_a)
 				sim_smas_fracHill.append(moon_a / sim_RHill)
 			sim_masses, sim_mass_ratios, sim_smas, sim_smas_fracHill = np.array(sim_masses), np.array(sim_mass_ratios), np.array(sim_smas), np.array(sim_smas_fracHill)
+			if np.any(sim_smas_fracHill) > 0.4895:
+				print("Moon beyond 0.4895 RHill")
+				time.sleep(1)
+
 
 			#plt.scatter(sim_smas_fracHill, np.linspace(nsim,nsim,sim_nmoons), s=np.log10(1/sim_mass_ratios)**2, edgecolor='k', facecolor='DodgerBlue', alpha=0.7)
 
