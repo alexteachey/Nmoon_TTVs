@@ -10,6 +10,7 @@ import pickle
 from scipy.optimize import curve_fit
 from scipy.stats import gaussian_kde
 import matplotlib.cm as cm
+from customized_violin import create_violin
 
 
 
@@ -158,7 +159,7 @@ try:
 			sim_masses, sim_mass_ratios, sim_smas, sim_smas_fracHill = np.array(sim_masses), np.array(sim_mass_ratios), np.array(sim_smas), np.array(sim_smas_fracHill)
 			if np.any(sim_smas_fracHill) > 0.4895:
 				print("Moon beyond 0.4895 RHill")
-				time.sleep(1)
+				#time.sleep(1)
 
 
 			#plt.scatter(sim_smas_fracHill, np.linspace(nsim,nsim,sim_nmoons), s=np.log10(1/sim_mass_ratios)**2, edgecolor='k', facecolor='DodgerBlue', alpha=0.7)
@@ -368,9 +369,11 @@ try:
 	Msats_over_Mps = np.array(Msats_over_Mps)
 
 
+
+
 	##### DATA CUTS
 	stable_megno_idxs = np.where((megno_vals >= 1.97) & (megno_vals <= 2.18))[0]
-	stable_spockprobs = np.where(spockprobs >= 0.8)[0] #### UPDATE BASED ON DEARTH OF P > 0.9 systems in the new paradigm.
+	stable_spockprobs = np.where(spockprobs >= 0.9)[0] #### UPDATE BASED ON DEARTH OF P > 0.9 systems in the new paradigm.
 	unstable_megno_idxs = np.concatenate((np.where(megno_vals < 1.97)[0], np.where(megno_vals > 2.18)[0]))
 	unstable_spockprobs = np.where(spockprobs < 0.9)[0]
 	stable_idxs = []
@@ -386,6 +389,42 @@ try:
 		elif (spockprobs[idx] < 0.9) and (idx in stable_megno_idxs):
 			continue 
 	stable_idxs = np.array(stable_idxs)		
+
+
+	#### CREATE A VIOLIN PLOT OF deltaBICs as a function of moons
+	violin_data = [[], [], [], [], []] #### a list of lists
+	for moonidx, nmoon in enumerate(np.arange(1,6,1)):
+		nmoon_idxs = np.where(nmoons == nmoon)[0]
+		nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
+		nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs].tolist()
+		violin_data[moonidx] = nmoon_deltaBICs
+	#create_violin(data, data_labels=None, x_label=None, y_label=None, plot_title=None, colormap='viridis')
+	create_violin(violin_data, data_labels=['1', '2', '3', '4','5'], x_label='# moons', y_label=r'$\Delta$ BIC', colormap='tab20c', autoshow=False)
+	plt.plot(np.linspace(0,6,100), np.linspace(-2,-2,100), c='k', linestyle=':', alpha=0.7)
+	plt.show()
+
+
+
+	#### PLOT DeltaBIC as a function of total moon mass, color coded by nmoons
+	colors = cm.get_cmap('Accent')(np.linspace(0,1,5))
+
+	for moonidx, nmoon in enumerate(np.arange(1,6,1)):
+		nmoon_idxs = np.where(nmoons == nmoon)[0]
+		nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
+		nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+		nmoon_total_masses = Msats_over_Mps[nmoon_stable_idxs]
+
+		plt.scatter(nmoon_total_masses, nmoon_deltaBICs, facecolor=colors[moonidx], edgecolor='k', alpha=0.7, s=20, label='N = '+str(nmoon))
+	plt.plot(np.logspace(-5,-2,100), np.linspace(-2,-2,100), c='k', alpha=0.5, linestyle=':')
+
+	plt.xlabel(r'$(\Sigma \, M_S) / M_P$')
+	plt.xscale('log')
+	plt.ylabel(r'$\Delta$ BIC')
+	plt.legend(loc=3)
+	plt.show()
+
+
+
 
 
 
