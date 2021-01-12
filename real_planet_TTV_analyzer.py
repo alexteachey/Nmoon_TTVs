@@ -12,6 +12,7 @@ import re
 from scipy.stats import gaussian_kde 
 import matplotlib.cm as cm 
 from scipy.special import factorial
+from moonpy import *
 
 """
 #### THIS SCRIPT IS GOING TO PRODUCE ONE PLOT -- the plot of P_TTV vs P_plan. 
@@ -52,6 +53,7 @@ def chisquare(data, model, errors):
 
 
 try:
+
 	show_plots = input('Do you want to show plots (for debugging)? y/n: ')
 
 	OCfile = pandas.read_csv('/data/tethys/Documents/Software/MoonPy/Table3_O-C.csv')
@@ -88,9 +90,41 @@ try:
 
 	unique_KOIs = np.unique(KOIs)
 
+
+
+
+
 	cumkois = ascii.read('/data/tethys/Documents/Software/MoonPy/cumkois.txt')
+	kepler_names = np.array(cumkois['kepler_name'])
 	kepois = np.array(cumkois['kepoi_name'])
 	kepoi_periods = np.array(cumkois['koi_period'])
+
+	##### FIND THE HADDEN & LITHWICK KOIs.
+	try:
+		HL_KOIs = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/Hadden_Lithwick_posteriors/HLKOIs.npy')
+		print('loaded HL_KOIs...')
+	
+	except:
+		HL_KOIs = []
+		print('generating HL_KOIs...')
+		HLplanet_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/Hadden_Lithwick_posteriors/HLplanet_list.npy')
+		for HLplanet in HLplanet_list:
+			if HLplanet.startswith('Kepler'):
+				#### find the kepoi in cumkois:
+				HL_kepoi_idx = np.where(kepler_names == HLplanet[:-1]+' '+HLplanet[-1])[0]
+				HL_kepoi = kepois[HL_kepoi_idx]
+			else:
+				HL_kepoi = HLplanet #### of the form K0001.01, etc
+
+			HL_KOI = HL_kepoi
+			while HL_KOI.startswith('K') or HL_KOI.startswith('0'):
+				HL_KOI = HL_KOI[1:]
+			HL_KOI = 'KOI-'+HL_KOI
+			HL_KOIs.append(HL_KOI)
+		HL_KOIs = np.array(HL_KOIs)
+		assert len(HL_KOIs) == len(HLplanet_list)
+		np.save('/data/tethys/Documents/Projects/NMoon_TTVs/Hadden_Lithwick_posteriors/HLKOIs.npy', HL_KOIs)
+
 
 	kepoi_nums = []
 	system_nums = []
