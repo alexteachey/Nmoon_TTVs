@@ -11,6 +11,7 @@ from scipy.optimize import curve_fit
 import re
 from scipy.stats import gaussian_kde 
 import matplotlib.cm as cm 
+from scipy.special import factorial
 
 """
 #### THIS SCRIPT IS GOING TO PRODUCE ONE PLOT -- the plot of P_TTV vs P_plan. 
@@ -26,6 +27,23 @@ import matplotlib.cm as cm
 8) sav the GKDE as a pickle, so you can import it and use it elsewhere to calculate a probability for a given P_TTV and P_plan.
 
 
+"""
+
+def n_choose_k(n,k):
+	numerator = factorial(n)
+	denominator = factorial(k) * factorial(n - k)
+	return numerator / denominator
+
+"""
+def binomial_probability(ntrials,nhits,phit):
+	#### computes an expectation value curve (ish) for nhits, based on ntrials and hit probability.
+	#### for example: if you have a coin with p(heads) = 0.5, and ntrials = 40, the curve maximum is at n=20.
+	#### it falls off on either side of that. Thus, if you have nhits = 10, you can read off the probability of getting that value
+	#### from the curve. (hint: it's low). 
+	#### if you want to compute the UNKNOWN VALUE phit, you will want to test a range of phits (with given ntrials and nhits), 
+	#### compute the curve, and find the phit for which the function you're calculating here is at maximum (~zero slope) 
+	#### for n = nhits. That is, whatever you pulled out is the maximum probability value, and the uncertainty comes from that.
+	#### you need to think about your application carefully before applying this.
 """
 
 def chisquare(data, model, errors):
@@ -75,22 +93,53 @@ try:
 	kepoi_periods = np.array(cumkois['koi_period'])
 
 	kepoi_nums = []
+	system_nums = []
 	for kepoi in kepois:
 		kepoi_num = kepoi
 		while (kepoi_num.startswith('K')) or (kepoi_num.startswith('0')):
 			kepoi_num = kepoi_num[1:]
 		kepoi_nums.append(kepoi_num)
+		system_nums.append(kepoi_num[:kepoi_num.find('.')]) #### leaves off the .01, .02, .03, etc.
 	kepoi_nums = np.array(kepoi_nums)
+	system_nums = np.array(system_nums)
 	kepois = kepoi_nums
+
+	#### determine if the kepois are in multi-planet systems
+	kepoi_multi = []
+	kepoi_multi_period_ratios = []
+
+	for nkep,kep in enumerate(kepois): ### kepois are already strings
+		kepoi_number = kep[:kep.find('.')] #### leaves off the final .01, .02, .03, etc.
+		#### find how many entries match this in system_nums.
+		all_system_planet_idxs = np.where(kepoi_number == system_nums)[0]
+		all_system_planet_periods = kepoi_periods[all_system_planet_idxs]
+		#
+
+		nplanets_in_system = len(all_system_planet_idxs)
+		if nplanets_in_system > 1:
+			kepoi_multi.append(True)
+
+		elif nplanets_in_system == 1:
+			kepoi_multi.append(False)
+		else:
+			raise Exception('something weird happening with the single / multi counter.')
+	kepoi_multi = np.array(kepoi_multi)
+
 
 
 	##### GENERATE LISTS 
 
 	P_TTVs = []
 	P_plans = []
+	deltaBICs = []
 
 
+	single_idxs = []
+	multi_idxs = []
+
+	entrynum = 0
 	for nkepoi, kepoi in enumerate(kepois):
+
 		try:
 			kepoi_period = kepoi_periods[nkepoi]
 			if kepoi_period <= 10:
@@ -150,6 +199,7 @@ try:
 			### we want BIC_curve to be SMALLER THAN BIC_flat, despite the penalty, for the SINE MODEL TO HOLD WATER.
 			#### SO IF THAT'S THE CASE, AND WE DO BIC_curve - BIC_flat, then delta-BIC will be negative, which is what we want.
 			deltaBIC = BIC_curve - BIC_flat 
+			deltaBICs.append(deltaBIC)
 
 
 			if show_plots == 'y':
@@ -169,11 +219,23 @@ try:
 				P_TTVs.append(peak_power_period)
 				P_plans.append(kepoi_period)
 
+				if kepoi_multi[nkepoi] == True:
+					#multi_idxs.append(nkepoi)
+					multi_idxs.append(entrynum)
+				elif kepoi_multi[nkepoi] == False:
+					#single_idxs.append(nkepoi)
+					single_idxs.append(entrynum)
+
+				entrynum += 1
+
+
+
 		except:
 			traceback.print_exc()
 			time.sleep(5)
 
-
+	multi_idxs = np.array(multi_idxs)
+	single_idxs = np.array(single_idxs)
 	P_TTVs = np.array(P_TTVs)
 	P_plans = np.array(P_plans)
 
@@ -222,6 +284,60 @@ try:
 	plt.show()
 
 	np.save('/data/tethys/Documents/Projects/NMoon_TTVs/mazeh_PTTV10-1500_Pplan2-100_20x20_heatmap.npy', TTV_Pplan_hist2d)
+
+
+	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
+	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
+	plt.figure(figsize=(6,6))
+	heatmap = plt.hist2d(P_plans, P_TTVs, bins=[xbins, ybins], cmap='coolwarm')[0]
+	plt.scatter(P_plans, P_TTVs, facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	plt.xscale('log')
+	plt.yscale('log')
+	plt.xlabel(r'$P_{\mathrm{P}}$ [days]')
+	plt.ylabel(r'$P_{\mathrm{TTV}}$ [epochs]')
+	#plt.title('Matplotlib 2D histogram')
+	plt.show()
+
+
+	##### LOOK AT THE HEATMAP FOR SINGLES AND MULTIS
+	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
+	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
+	fig, (ax1, ax2) = plt.subplots(2, figsize=(6,12))
+	heatmap_single = ax1.hist2d(P_plans[single_idxs], P_TTVs[single_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
+	ax1.scatter(P_plans[single_idxs], P_TTVs[single_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	ax1.set_xscale('log')
+	ax1.set_yscale('log')
+	ax1.set_ylabel(r'$P_{\mathrm{TTV}}$ [epochs] (single)')
+
+	heatmap_multi = ax2.hist2d(P_plans[multi_idxs], P_TTVs[multi_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
+	ax2.scatter(P_plans[multi_idxs], P_TTVs[multi_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	ax2.set_xscale('log')
+	ax2.set_yscale('log')
+	ax2.set_ylabel(r'$P_{\mathrm{TTV}}$ [epochs] (multi)')
+
+	ax2.set_xlabel(r'$P_{\mathrm{P}}$ [days]')
+
+
+	#plt.title('Matplotlib 2D histogram')
+	plt.show()	
+
+
+
+
+
+	heatmap_column_sums = []
+	for i in np.arange(0,19,1):
+		heatmap_colsum = np.nansum(heatmap[i])
+		heatmap_column_sums.append(heatmap_colsum)
+	heatmap_column_sums = np.array(heatmap_column_sums)
+
+	heatmap_div_pplans = (heatmap.T / heatmap_column_sums).T
+
+	##### UNFORTUNATELY YOU CAN'T USE THE SAME FRAMEWORK AS BEFORE!
+	
+
+
+
 
 
 
