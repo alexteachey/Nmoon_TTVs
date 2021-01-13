@@ -111,11 +111,16 @@ try:
 		for HLplanet in HLplanet_list:
 			if HLplanet.startswith('Kepler'):
 				#### find the kepoi in cumkois:
-				HL_kepoi_idx = np.where(kepler_names == HLplanet[:-1]+' '+HLplanet[-1])[0]
+				HLplanet_proper_format = HLplanet[:-1]+' '+HLplanet[-1]
+				if HLplanet_proper_format.startswith('Kepler-25') or HLplanet_proper_format.startswith('Kepler-89') or HLplanet_proper_format.startswith('Kepler-444'):
+					HLplanet_proper_format = HLplanet_proper_format[:-2]+' A '+HLplanet_proper_format[-1]
+				HL_kepoi_idx = np.where(kepler_names == HLplanet_proper_format)[0]
 				HL_kepoi = kepois[HL_kepoi_idx]
 			else:
 				HL_kepoi = HLplanet #### of the form K0001.01, etc
 
+			if type(HL_kepoi) == np.ndarray:
+				HL_kepoi = HL_kepoi[0]
 			HL_KOI = HL_kepoi
 			while HL_KOI.startswith('K') or HL_KOI.startswith('0'):
 				HL_KOI = HL_KOI[1:]
@@ -140,13 +145,42 @@ try:
 
 	#### determine if the kepois are in multi-planet systems
 	kepoi_multi = []
-	kepoi_multi_period_ratios = []
+	kepoi_multi_Pip1_over_Pis = [] #### P_{i+1} / P_i #### covers all but the outermost planet
+	kepoi_multi_Pi_over_Pim1s = [] #### P_i / P_{i - 1} #### cover all but the innermost planet
 
 	for nkep,kep in enumerate(kepois): ### kepois are already strings
 		kepoi_number = kep[:kep.find('.')] #### leaves off the final .01, .02, .03, etc.
 		#### find how many entries match this in system_nums.
 		all_system_planet_idxs = np.where(kepoi_number == system_nums)[0]
 		all_system_planet_periods = kepoi_periods[all_system_planet_idxs]
+		all_system_planet_periods_sorted = np.sort(all_system_planet_periods)
+		this_planet_idx = np.where(kep == kepois)[0]
+		this_planet_period = kepoi_periods[this_planet_idx][0]
+		this_planet_order_number_idx = np.where(all_system_planet_periods_sorted == this_planet_period)[0]
+		try:
+			next_highest_period = all_system_planet_periods_sorted[this_planet_order_number_idx+1]
+		except:
+			next_highest_period = np.nan 
+
+		try:
+			if this_planet_order_number_idx != 0:
+				next_lowest_period = all_system_planet_periods_sorted[this_planet_order_number_idx-1]
+			else:
+				next_lowest_period = np.nan
+		except:
+			next_lowest_period = np.nan 
+
+
+		this_planet_Pip1_over_Pi = next_highest_period / this_planet_period
+		this_planet_Pi_over_Pim1 = this_planet_period / next_lowest_period
+
+		assert (this_planet_Pip1_over_Pi >= 1) or (np.isfinite(this_planet_Pip1_over_Pi) == False)
+		assert (this_planet_Pi_over_Pim1 >= 1) or (np.isfinite(this_planet_Pi_over_Pim1) == False)
+
+		kepoi_multi_Pip1_over_Pis.append(this_planet_Pip1_over_Pi)
+		kepoi_multi_Pi_over_Pim1s.append(this_planet_Pi_over_Pim1)
+
+
 		#
 
 		nplanets_in_system = len(all_system_planet_idxs)
@@ -158,7 +192,8 @@ try:
 		else:
 			raise Exception('something weird happening with the single / multi counter.')
 	kepoi_multi = np.array(kepoi_multi)
-
+	kepoi_multi_Pip1_over_Pis = np.array(kepoi_multi_Pip1_over_Pis)
+	kepoi_multi_Pi_over_Pim1s = np.array(kepoi_multi_Pi_over_Pim1s)
 
 
 	##### GENERATE LISTS 
@@ -167,18 +202,21 @@ try:
 	P_plans = []
 	deltaBICs = []
 
-
+	TTV_amplitudes = []
 	single_idxs = []
 	multi_idxs = []
+	in_HLcatalog_idxs = []
+	notin_HLcatalog_idxs = []
+
 
 	entrynum = 0
 	for nkepoi, kepoi in enumerate(kepois):
 
 		try:
 			kepoi_period = kepoi_periods[nkepoi]
-			if kepoi_period <= 10:
-				### we're not interested in these!
-				continue 
+			#if kepoi_period <= 10:
+			#	### we're not interested in these!
+			#	continue 
 
 			print('KOI-'+str(kepoi))
 			KOI_idxs = np.where(KOIs == kepoi)[0]
@@ -188,8 +226,9 @@ try:
 
 			KOI_epochs, KOI_OCs, KOI_OCerrs = epochs[KOI_idxs], OCmin[KOI_idxs], OCmin_err[KOI_idxs]
 			KOI_rms = np.sqrt(np.nanmean(KOI_OCs**2))
+			orig_KOI_rms = KOI_rms
 
-			non_outlier_idxs = np.where(np.abs(KOI_OCs) <= 5*KOI_rms)[0]
+			non_outlier_idxs = np.where(np.abs(KOI_OCs) <= np.sqrt(2)*KOI_rms)[0]
 			#non_outlier_idxs = np.where((np.abs(KOI_OCs) - 10*KOI_OCerrs) > KOI_rms)[0]
 			KOI_epochs, KOI_OCs, KOI_OCerrs = KOI_epochs[non_outlier_idxs], KOI_OCs[non_outlier_idxs], KOI_OCerrs[non_outlier_idxs]
 			KOI_rms = np.sqrt(np.nanmean(KOI_OCs**2))
@@ -206,6 +245,7 @@ try:
 			peak_power_freq = 1/peak_power_period
 
 
+			"""
 			if show_plots == 'y':
 				plt.plot(LSperiods, LSpowers, color='DodgerBlue', alpha=0.7, linewidth=2)
 				plt.xlabel('Period [epochs]')
@@ -213,7 +253,7 @@ try:
 				plt.xscale('log')
 				plt.title('KOI-'+str(kepoi))
 				plt.show()
-
+			"""
 
 			#### NOW FIT A SINUSOID! ### FIX THE FREQUENCY -- have to define the function anew each step to do the curve fit
 
@@ -236,7 +276,7 @@ try:
 			deltaBICs.append(deltaBIC)
 
 
-			if show_plots == 'y':
+			if (show_plots == 'y') and ('KOI-'+kepoi in HL_KOIs):
 				KOI_epochs_interp = np.linspace(np.nanmin(KOI_epochs), np.nanmax(KOI_epochs), 1000)
 				KOI_TTV_interp = sinecurve(KOI_epochs_interp, *popt)
 
@@ -246,12 +286,14 @@ try:
 				plt.plot(KOI_epochs, np.linspace(0,0,len(KOI_epochs)), color='k', linestyle=':', alpha=0.5, zorder=0)
 				plt.xlabel("epoch")
 				plt.ylabel('O - C [min]')
-				plt.title('KOI-'+str(kepoi)+r', $\Delta \mathrm{BIC} = $'+str(round(deltaBIC, 2)))
+				plt.title('KOI-'+str(kepoi)+r', rms = '+str(round(orig_KOI_rms,2))+', $\Delta \mathrm{BIC} = $'+str(round(deltaBIC, 2)))
 				plt.show()
 
 			if deltaBIC <= -2:
 				P_TTVs.append(peak_power_period)
 				P_plans.append(kepoi_period)
+				amplitude = np.nanmax(np.abs(BIC_curve))
+				TTV_amplitudes.append(amplitude)
 
 				if kepoi_multi[nkepoi] == True:
 					#multi_idxs.append(nkepoi)
@@ -259,6 +301,12 @@ try:
 				elif kepoi_multi[nkepoi] == False:
 					#single_idxs.append(nkepoi)
 					single_idxs.append(entrynum)
+
+
+				if 'KOI-'+kepoi in HL_KOIs:
+					in_HLcatalog_idxs.append(entrynum)
+				else:
+					notin_HLcatalog_idxs.append(entrynum)
 
 				entrynum += 1
 
@@ -270,6 +318,13 @@ try:
 
 	multi_idxs = np.array(multi_idxs)
 	single_idxs = np.array(single_idxs)
+	in_HLcatalog_idxs = np.array(in_HLcatalog_idxs)
+	notin_HLcatalog_idxs = np.array(notin_HLcatalog_idxs)
+	TTV_amplitudes = np.array(TTV_amplitudes)
+
+	print('# singles , # multis = ', len(single_idxs), len(multi_idxs))
+	print('# in HL , # not in HL = ', len(in_HLcatalog_idxs), len(notin_HLcatalog_idxs))
+
 	P_TTVs = np.array(P_TTVs)
 	P_plans = np.array(P_plans)
 
@@ -292,6 +347,7 @@ try:
 
 
 	colors = cm.coolwarm(gkde_norm_values)
+
 
 	plt.scatter(gkde_points_p, gkde_points_t, facecolor=colors, s=100)
 	#plt.show()
@@ -354,6 +410,167 @@ try:
 
 	#plt.title('Matplotlib 2D histogram')
 	plt.show()	
+
+
+
+
+	##### LOOK AT THE DISTRIBUTION FOR HL2017 SOURCES and Non-HL2017 sources
+	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
+	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
+	fig, (ax1, ax2) = plt.subplots(2, figsize=(6,12))
+	heatmap_single = ax1.hist2d(P_plans[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
+	ax1.scatter(P_plans[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	ax1.set_xscale('log')
+	ax1.set_yscale('log')
+	ax1.set_ylabel(r'$P_{\mathrm{TTV}}$ [epochs] (HL2017)')
+
+	heatmap_multi = ax2.hist2d(P_plans[notin_HLcatalog_idxs], P_TTVs[notin_HLcatalog_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
+	ax2.scatter(P_plans[notin_HLcatalog_idxs], P_TTVs[notin_HLcatalog_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	ax2.set_xscale('log')
+	ax2.set_yscale('log')
+	ax2.set_ylabel(r'$P_{\mathrm{TTV}}$ [epochs] (non-HL2017)')
+
+	ax2.set_xlabel(r'$P_{\mathrm{P}}$ [days]')
+
+
+	#plt.title('Matplotlib 2D histogram')
+	plt.show()	
+
+
+
+	##### LOOK AT AMPLITUDE VS PTTV FOR HL2017 SOURCES and Non-HL2017 sources
+	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
+	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
+	fig, (ax1, ax2) = plt.subplots(2, figsize=(6,12))
+	heatmap_single = ax1.hist2d(P_TTVs[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
+	ax1.scatter(P_TTVs[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	ax1.set_xscale('log')
+	#ax1.set_yscale('log')
+	ax1.set_ylabel(r'amplitude [minutes] (HL2017)')
+
+	heatmap_multi = ax2.hist2d(P_TTVs[notin_HLcatalog_idxs], TTV_amplitudes[notin_HLcatalog_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
+	ax2.scatter(P_TTVs[notin_HLcatalog_idxs], TTV_amplitudes[notin_HLcatalog_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	ax2.set_xscale('log')
+	#ax2.set_yscale('log')
+	ax2.set_ylabel(r'amplitude [minutes] (non-HL2017)')
+
+	ax2.set_xlabel(r'$P_{\mathrm{TTV}}$ [days]')
+
+
+	#plt.title('Matplotlib 2D histogram')
+	plt.show()	
+
+
+
+
+	##### LOOK AT AMPLITUDE VS PTTV FOR SINGLES AND MULTIs
+	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
+	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
+	fig, (ax1, ax2) = plt.subplots(2, figsize=(6,12))
+	heatmap_single = ax1.hist2d(P_TTVs[single_idxs], TTV_amplitudes[single_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
+	ax1.scatter(P_TTVs[single_idxs], TTV_amplitudes[single_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	ax1.set_xscale('log')
+	#ax1.set_yscale('log')
+	ax1.set_ylabel(r'amplitude [minutes] (single)')
+
+	heatmap_multi = ax2.hist2d(P_TTVs[multi_idxs], TTV_amplitudes[multi_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
+	ax2.scatter(P_TTVs[multi_idxs], TTV_amplitudes[multi_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	ax2.set_xscale('log')
+	#ax2.set_yscale('log')
+	ax2.set_ylabel(r'amplitude [minutes] (multi)')
+
+	ax2.set_xlabel(r'$P_{\mathrm{P}}$ [days]')
+
+
+	#plt.title('Matplotlib 2D histogram')
+	plt.show()	
+
+
+
+
+
+	#### make straight-up histograms for HL2017 and non-HL20217
+	fig, (ax1, ax2) = plt.subplots(2, sharex=True)
+	ax1.hist(P_TTVs[in_HLcatalog_idxs], bins=ybins, facecolor='DodgerBlue', edgecolor='k', alpha=0.7)
+	ax1.set_ylabel('HL2017')
+	ax1.set_xscale('log')
+	ax2.hist(P_TTVs[notin_HLcatalog_idxs], bins=ybins, facecolor='LightCoral', edgecolor='k', alpha=0.7)
+	ax2.set_ylabel('non - HL2017')
+	ax2.set_xlabel(r'$P_{\mathrm{TTV}}$ [epochs]')
+	ax2.set_xscale('log')
+	plt.show()
+
+
+
+	#### make straight-up histograms for HL2017 and non-HL20217 -- AMPLITUDES
+	fig, (ax1, ax2) = plt.subplots(2, sharex=True)
+	ax1.hist(TTV_amplitudes[in_HLcatalog_idxs], bins=ybins, facecolor='DodgerBlue', edgecolor='k', alpha=0.7)
+	ax1.set_ylabel('HL2017')
+	ax1.set_xscale('log')
+	ax2.hist(TTV_amplitudes[notin_HLcatalog_idxs], bins=ybins, facecolor='LightCoral', edgecolor='k', alpha=0.7)
+	ax2.set_ylabel('non - HL2017')
+	ax2.set_xlabel(r'TTV amplitude [minutes]')
+	ax2.set_xscale('log')
+	plt.show()
+
+
+
+	#### AMPLTIUDES -- singles vs multies
+	fig, (ax1, ax2) = plt.subplots(2, sharex=True)
+	ax1.hist(TTV_amplitudes[single_idxs], bins=ybins, facecolor='DodgerBlue', edgecolor='k', alpha=0.7)
+	ax1.set_ylabel('single')
+	ax1.set_xscale('log')
+	ax2.hist(TTV_amplitudes[multi_idxs], bins=ybins, facecolor='LightCoral', edgecolor='k', alpha=0.7)
+	ax2.set_ylabel('multi')
+	ax2.set_xlabel(r'TTV amplitude [minutes]')
+	ax2.set_xscale('log')
+	plt.show()
+
+
+	deltaBICs = np.array(deltaBICs)
+
+	#### do the same for Delta-BICs (HL vs nonHL)
+	fig, (ax1, ax2) = plt.subplots(2, sharex=True)
+	ax1.hist(deltaBICs[in_HLcatalog_idxs], bins=np.arange(-100,0,5), facecolor='DodgerBlue', edgecolor='k', alpha=0.7)
+	ax1.set_ylabel('HL2017')
+	#ax1.set_xscale('log')
+	ax2.hist(deltaBICs[notin_HLcatalog_idxs], bins=np.arange(-100,0,5), facecolor='LightCoral', edgecolor='k', alpha=0.7)
+	ax2.set_ylabel('non - HL2017')
+	ax2.set_xlabel(r'$\Delta$BIC')
+	#ax2.set_xscale('log')
+	plt.show()
+
+
+
+	#### do the same for Delta-BICs (single vs multi)
+	fig, (ax1, ax2) = plt.subplots(2, sharex=True)
+	ax1.hist(deltaBICs[single_idxs], bins=np.arange(-100,0,5), facecolor='DodgerBlue', edgecolor='k', alpha=0.7)
+	ax1.set_ylabel('single')
+	#ax1.set_xscale('log')
+	ax2.hist(deltaBICs[multi_idxs], bins=np.arange(-100,0,5), facecolor='LightCoral', edgecolor='k', alpha=0.7)
+	ax2.set_ylabel('multi')
+	ax2.set_xlabel(r'$\Delta$BIC')
+	#ax2.set_xscale('log')
+	plt.show()
+
+
+
+	##### PLOT amplitude and PTTV as a function of the MULTI periods
+
+	fig, (ax1, ax2) = plt.subplots(2, sharex=True, sharey=True)
+	ax1.scatter(kepoi_multi_Pip1_over_Pis[multi_idxs], TTV_amplitudes[multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.7)
+	ax1.set_ylabel('TTV amplitude [minutes]')
+	ax1.set_xlabel(r'$P_{i+1} / P_i$ ')
+	ax1.set_xscale('log')
+	ax1.set_yscale('log')
+	#ax1.set_ylim(0,100)
+	ax2.scatter(kepoi_multi_Pi_over_Pim1s[multi_idxs], TTV_amplitudes[multi_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.7)
+	ax2.set_ylabel('TTV amplitude [minutes]')
+	ax2.set_xlabel(r'$P_i / P_{i-1}$ ')
+	ax2.set_xscale('log')
+	ax2.set_yscale('log')
+	#ax2.set_ylim(0,1000)
+	plt.show()
 
 
 

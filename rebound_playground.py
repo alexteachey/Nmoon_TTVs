@@ -97,7 +97,7 @@ if os.path.exists(projectdir+'/'+sim_summary_filename):
 else:
 	sim_summaryfile = open(projectdir+'/'+sim_summary_filename, mode='w')
 	### write the columns!
-	colnames = 'sim,nmoons,Pplan_days,ntransits,Mmoons_over_Mplan,TTV_rmsamp_sec,TTVperiod_epochs,MEGNO,SPOCK_survprop,final_AMD\n'
+	colnames = 'sim,nmoons,Pplan_days,ntransits,Mmoons_over_Mplan,TTV_rmsamp_sec,TTVperiod_epochs,MEGNO,SPOCK_survprop,final_AMD,spacing\n'
 	sim_summaryfile.write(colnames)
 	sim_summaryfile.close()
 
@@ -230,7 +230,9 @@ try:
 					total_moon_fracs = np.nansum(moon_mass_pcts)				
 
 
-
+			section_spacing_options = np.array(['linear', 'logarithmic'])
+			section_spacing_choice = np.random.choice(section_spacing_options)
+			print('section spacing = ', section_spacing_choice)
 
 			for nmoon in np.arange(0,nmoons,1):
 				### select m, a, e, and inc!
@@ -287,6 +289,41 @@ try:
 				Roche_meters = Roche(rsat=moon_radius_meters, mplan=planet_mass_kg, msat=moon_mass_kg)
 				Roche_Rp = Roche_meters / planet_radius_meters 
 
+				
+				#### redoing this (1/5/2021)
+				nsections = int(nmoons - nmoon) ### if you have 4 moons, and this is moon zero, you have four sections
+				outer_limit_meters = 0.4895*Plan_Rhill_meters
+				
+				if nmoon == 0:
+					inner_limit_meters = Roche_meters
+				else:
+					pass
+
+
+				if section_spacing_choice == 'linear':
+					section_limits = np.linspace(inner_limit_meters, outer_limit_meters, nsections+1)
+				
+				elif section_spacing_choice == 'logarithmic':
+					section_limits = np.logspace(np.log10(inner_limit_meters), np.log10(outer_limit_meters), nsections+1) #### for four sections, you need five limits
+				
+
+				moon_sma_meters = np.random.choice(np.linspace(section_limits[0], section_limits[1], 10000))
+				#### update inner_limit_meters
+				inner_limit_meters = moon_sma_meters
+
+				moon_sma_Rp = moon_sma_meters / planet_radius_meters 
+
+				### calculate the nominal orbital period based on this moon and the primary only
+				moon_period_seconds = np.sqrt( (4*np.pi**2 * moon_sma_meters**3) / (G.value * (planet_mass_kg + moon_mass_kg)) )
+
+				### calculate the MOON'S HILL RADIUS!
+				moon_Rhill_meters = RHill(sma=moon_sma_meters, mplan=moon_mass_kg, mstar=planet_mass_kg)
+
+				system_dict[moon_label] = {'m':moon_mass_kg, 'a':moon_sma_meters, 'aRp':moon_sma_Rp, 'e':moon_ecc, 'inc':moon_inc, 'pomega':long_peri, 'f':true_anom, 'P':moon_period_seconds, 'RHill':moon_Rhill_meters, 'spacing':section_spacing_choice}
+				moon_dict[moon_label] = {'m':moon_mass_kg, 'a':moon_sma_meters, 'aRp':moon_sma_Rp, 'e':moon_ecc, 'inc':moon_inc, 'pomega':long_peri, 'f':true_anom, 'P':moon_period_seconds, 'RHill':moon_Rhill_meters, 'spacing':section_spacing_choice}
+
+
+				"""
 
 				if nmoon == 0:
 
@@ -383,7 +420,7 @@ try:
 
 						#### FOR NON-MMR SYSTEMS
 						#print('last inner limit (Rp) = ', inner_limit_meters / planet_radius_meters)
-						if (0.5*Plan_Rhill_meters < inner_limit_meters) and (enforce_stability == 'y'):
+						if (0.4895*Plan_Rhill_meters < inner_limit_meters) and (enforce_stability == 'y'):
 							print('LAST MOON OUTSIDE HALF RHILL. SCRAPPING.')
 							print(' ')
 							unstable = 'y'
@@ -408,7 +445,7 @@ try:
 						moon_dict[moon_label] = {'m':moon_mass_kg, 'a':moon_sma_meters, 'aRp':moon_sma_Rp, 'e':moon_ecc, 'pomega':long_peri, 'f':true_anom, 'inc':moon_inc, 'P':moon_period_seconds, 'RHill':moon_Rhill_meters}
 
 
-
+				
 
 				#### new inner_limit_meters is the moon_sma_meters -- RECOMPUTE
 				inner_limit_meters = moon_sma_meters #### the new inner limit based on the moon just generated above.
@@ -418,6 +455,7 @@ try:
 
 				inner_limit_meters = section_limits[0]*1.5
 				outer_limit_meters = section_limits[1]
+				"""
 
 
 				print('Moon: ', moon_label)
@@ -898,7 +936,7 @@ try:
 			#sim_summaryfile.write(colnames)
 			TTVobs_RMS = np.sqrt(np.nanmean(adjusted_displacements_seconds**2))
 			Mmoons_over_Mplan = total_moon_mass_kg / planet_mass_kg
-			colvals = str(sim_number)+','+str(int(nmoons))+','+str(Pplan_days)+','+str(len(raw_timings))+','+str(Mmoons_over_Mplan)+','+str(TTVobs_RMS)+','+str(best_LS_period)+','+str(megno)+','+str(stability_probability)+','+str(AMDs[-1])+'\n'
+			colvals = str(sim_number)+','+str(int(nmoons))+','+str(Pplan_days)+','+str(len(raw_timings))+','+str(Mmoons_over_Mplan)+','+str(TTVobs_RMS)+','+str(best_LS_period)+','+str(megno)+','+str(stability_probability)+','+str(AMDs[-1])+','+str(section_spacing_choice)+'\n'
 
 			sim_summaryfile = open(projectdir+'/'+sim_summary_filename, mode='a')
 			sim_summaryfile.write(colvals)

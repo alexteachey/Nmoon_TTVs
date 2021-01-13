@@ -10,7 +10,8 @@ import pickle
 from scipy.optimize import curve_fit
 from scipy.stats import gaussian_kde
 import matplotlib.cm as cm
-from customized_violin import create_violin
+#from customized_violin import create_violin
+from violin_plotter import create_violin
 
 
 
@@ -81,6 +82,7 @@ try:
 	megno_vals = np.array(summaryfile['MEGNO'])
 	spockprobs = np.array(summaryfile['SPOCK_survprop'])
 
+	"""
 
 	first_n1, first_n2, first_n3, first_n4, first_n5 = 'n', 'n', 'n', 'n', 'n'
 	highest_number = 1
@@ -183,6 +185,7 @@ try:
 	plt.legend()
 	plt.show()
 
+	"""
 
 
 
@@ -327,12 +330,13 @@ try:
 			#### plot the positions
 			nparticles = sim_xpos.shape[0]
 			if show_individual_plots == 'y':
+				#fig, ax = plt.figure(figsize=(6,6))
 				for particle in np.arange(0,nparticles,1):
 					part_xpos, part_ypos = sim_xpos[particle], sim_ypos[particle]
 					plt.plot(part_xpos, part_ypos, alpha=0.7)
-					plt.xlabel(r'$a / a_{I}$')
-					plt.ylabel(r'$a / a_{I}$')
-					plt.title("MEGNO = "+str(round(sim_MEGNO, 2))+', stability prob = '+str(round(sim_SPOCKprob*100,2))+'%')
+				plt.xlabel(r'$a / a_{I}$')
+				plt.ylabel(r'$a / a_{I}$')
+				plt.title("MEGNO = "+str(round(sim_MEGNO, 2))+', stability prob = '+str(round(sim_SPOCKprob*100,2))+'%')
 				plt.show()
 
 
@@ -669,8 +673,25 @@ try:
 	plt.yticks(ticks=np.arange(0,len(ybins),5), labels=np.around(np.log10(ybins[::5]), 2))
 	plt.xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	plt.ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
+	plt.title('Numpy 2D histogram')
 	plt.tight_layout()
 	plt.show()
+
+	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
+	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
+	plt.figure(figsize=(6,6))
+	plt.hist2d(P_plans, P_TTVs, bins=[xbins, ybins], cmap='coolwarm')
+	plt.scatter(P_plans, P_TTVs, facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	plt.xscale('log')
+	plt.yscale('log')
+	plt.xlabel(r'$P_{\mathrm{P}}$ [days]')
+	plt.ylabel(r'$P_{\mathrm{TTV}}$ [epochs]')
+	#plt.title('Matplotlib 2D histogram')
+	plt.show()
+
+
+
+
 
 	np.save('/data/tethys/Documents/Projects/NMoon_TTVs/simulated_PTTV10-1500_Pplan2-100_20x20_heatmap.npy', TTV_Pplan_hist2d)
 
