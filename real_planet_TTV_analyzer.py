@@ -11,8 +11,12 @@ from scipy.optimize import curve_fit
 import re
 from scipy.stats import gaussian_kde 
 import matplotlib.cm as cm 
+import matplotlib.gridspec as gridspec 
 from scipy.special import factorial
 from moonpy import *
+import socket
+from mr_forecast import Rstat2M
+from scipy.stats import kstest 
 
 """
 #### THIS SCRIPT IS GOING TO PRODUCE ONE PLOT -- the plot of P_TTV vs P_plan. 
@@ -29,6 +33,26 @@ from moonpy import *
 
 
 """
+
+
+
+if socket.gethostname() == 'tethys.asiaa.sinica.edu.tw':
+	#projectdir = '/data/tethys/Documents/Projects/NMoon_TTVs'
+	projectdir = '/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs'
+elif socket.gethostname() == 'Alexs-MacBook-Pro.local':
+	projectdir = '/Users/hal9000/Documents/Projects/Nmoon_TTVsim'
+else:
+	projectdir = input('Please input the project directory: ')
+
+positionsdir = projectdir+'/sim_positions'
+ttvfiledir = projectdir+'/sim_TTVs'
+LSdir = projectdir+'/sim_periodograms'
+modeldictdir = projectdir+'/sim_model_settings'
+plotdir = projectdir+'/sim_plots'
+
+
+
+
 
 def n_choose_k(n,k):
 	numerator = factorial(n)
@@ -98,6 +122,11 @@ try:
 	kepler_names = np.array(cumkois['kepler_name'])
 	kepois = np.array(cumkois['kepoi_name'])
 	kepoi_periods = np.array(cumkois['koi_period'])
+	kepler_radius_rearth = np.array(cumkois['koi_prad'])
+	kepler_radius_rearth_uperr = np.array(cumkois['koi_prad_err1'])
+	kepler_radius_rearth_lowerr = np.array(cumkois['koi_prad_err2'])
+	kepler_radius_rearth_err = np.nanmean((kepler_radius_rearth_uperr, np.abs(kepler_radius_rearth_lowerr)), axis=0)
+
 
 	##### FIND THE HADDEN & LITHWICK KOIs.
 	try:
@@ -196,11 +225,21 @@ try:
 	kepoi_multi_Pi_over_Pim1s = np.array(kepoi_multi_Pi_over_Pim1s)
 
 
+
+
+
+
+
+
 	##### GENERATE LISTS 
 
+	radii = [] #### EARTH RADII
+	radii_errors = []
 	P_TTVs = []
 	P_plans = []
 	deltaBICs = []
+	Pip1_over_Pis = []
+	Pi_over_Pim1s = []
 
 	TTV_amplitudes = []
 	single_idxs = []
@@ -290,10 +329,14 @@ try:
 				plt.show()
 
 			if deltaBIC <= -2:
+				radii.append(kepler_radius_rearth[nkepoi])
+				radii_errors.append(kepler_radius_rearth_err[nkepoi])
 				P_TTVs.append(peak_power_period)
 				P_plans.append(kepoi_period)
 				amplitude = np.nanmax(np.abs(BIC_curve))
 				TTV_amplitudes.append(amplitude)
+				Pip1_over_Pis.append(kepoi_multi_Pip1_over_Pis)
+				Pi_over_Pim1s.append(kepoi_multi_Pi_over_Pim1s)
 
 				if kepoi_multi[nkepoi] == True:
 					#multi_idxs.append(nkepoi)
@@ -320,6 +363,8 @@ try:
 	single_idxs = np.array(single_idxs)
 	in_HLcatalog_idxs = np.array(in_HLcatalog_idxs)
 	notin_HLcatalog_idxs = np.array(notin_HLcatalog_idxs)
+	notin_HLcatalog_single_idxs = np.intersect1d(single_idxs, notin_HLcatalog_idxs)
+	notin_HLcatalog_multi_idxs = np.intersect1d(multi_idxs, notin_HLcatalog_idxs)
 	TTV_amplitudes = np.array(TTV_amplitudes)
 
 	print('# singles , # multis = ', len(single_idxs), len(multi_idxs))
@@ -327,6 +372,82 @@ try:
 
 	P_TTVs = np.array(P_TTVs)
 	P_plans = np.array(P_plans)
+	radii = np.array(radii)
+	radii_errors = np.array(radii_errors)
+
+
+
+	### generate masses
+	"""
+	Rstat2M = np.vectorize(Rstat2M)
+	print('FORECASTing masses from radii: ')
+	forecast_masses, forecast_masses_uperr, forecast_masses_lowerr = Rstat2M(mean=radii, std=radii_errors, unit='Earth')
+
+	highest_mass = np.nanmax(forecast_masses)
+	normalized_masses = forecast_masses / highest_mass
+
+	amplitudes_div_masses = TTV_amplitudes / normalized_masses
+	"""
+
+	plt.scatter(P_plans[notin_HLcatalog_single_idxs], TTV_amplitudes[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
+	plt.scatter(P_plans[notin_HLcatalog_multi_idxs], TTV_amplitudes[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
+	plt.scatter(P_plans[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
+	plt.xlabel(r'$P_{\mathrm{P}}$ [days]')
+	plt.ylabel('TTV amplitude [s]')
+	plt.yscale('log')
+	plt.legend()
+	plt.show()
+
+
+	plt.scatter(P_TTVs[notin_HLcatalog_single_idxs], TTV_amplitudes[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
+	plt.scatter(P_TTVs[notin_HLcatalog_multi_idxs], TTV_amplitudes[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
+	plt.scatter(P_TTVs[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
+	plt.xlabel(r'$P_{\mathrm{TTV}}$ [epochs]')
+	plt.ylabel('TTV amplitude [s]')
+	plt.yscale('log')
+	plt.xscale('log')
+	plt.legend()
+	plt.show()
+
+
+	plt.scatter(P_plans[notin_HLcatalog_single_idxs], P_TTVs[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
+	plt.scatter(P_plans[notin_HLcatalog_multi_idxs], P_TTVs[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
+	plt.scatter(P_plans[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
+	plt.xlabel(r'$P_{\mathrm{P}}$ [days]')
+	plt.ylabel(r'$P_{\mathrm{TTV}}$ [epochs]')
+	plt.yscale('log')
+	plt.xscale('log')
+	plt.legend()
+	plt.show()
+
+
+	"""
+	#### replace all forecast_masses == 0.0 with np.nan!
+	forecast_masses[np.where(forecast_masses == 0.0)[0]] = np.nan
+
+	#### look at the mass distributions 
+	plt.scatter(P_plans[notin_HLcatalog_single_idxs], forecast_masses[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
+	plt.scatter(P_plans[notin_HLcatalog_multi_idxs], forecast_masses[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
+	plt.scatter(P_plans[in_HLcatalog_idxs], forecast_masses[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
+	
+
+
+	plt.xlabel(r'$P_{\mathrm{P}}$ [days]')
+	plt.ylabel(r'FORECASTER $M_{\oplus}$')
+	plt.yscale('log')
+	plt.xscale('log')
+	plt.legend()
+	plt.show()
+	"""
+
+
+
+
+
+
+	#raise Exception('this is all you want to do right now.')
+
+
 
 	kdestack = np.vstack((P_plans, P_TTVs))
 
@@ -364,6 +485,22 @@ try:
 	#### SOMETHING IS WEIRD ABOUT THE GKDE -- try a heatmap (hist2d)
 	xbins = np.logspace(np.log10(10), np.log10(1500), 20) #### consistent with the simulation
 	ybins = np.logspace(np.log10(2), np.log10(100), 20) #### consistent with the simulation
+	xcenters, ycenters = [], []
+	for nxb,xb in enumerate(xbins):
+		try:
+			xcenters.append(np.nanmean((xbins[nxb+1], xbins[nxb])))
+		except:
+			pass
+
+	for nyb, yb in enumerate(ybins):
+		try:
+			ycenters.append(np.nanmean((ybins[nyb+1], ybins[nyb])))
+		except:
+			pass
+	xcenters, ycenters = np.array(xcenters), np.array(ycenters)
+
+
+
 	TTV_Pplan_hist2d = np.histogram2d(P_plans, P_TTVs, bins=[xbins, ybins])
 	plt.imshow(TTV_Pplan_hist2d[0].T, origin='lower', cmap=cm.coolwarm)
 	plt.xticks(ticks=np.arange(0,len(xbins),5), labels=np.around(np.log10(xbins[::5]),2))
@@ -389,6 +526,16 @@ try:
 	plt.show()
 
 
+
+
+
+
+
+
+
+
+
+
 	##### LOOK AT THE HEATMAP FOR SINGLES AND MULTIS
 	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
 	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
@@ -398,6 +545,8 @@ try:
 	ax1.set_xscale('log')
 	ax1.set_yscale('log')
 	ax1.set_ylabel(r'$P_{\mathrm{TTV}}$ [epochs] (single)')
+
+	np.save('/data/tethys/Documents/Projects/NMoon_TTVs/heatmap_single.npy', heatmap_single)	
 
 	heatmap_multi = ax2.hist2d(P_plans[multi_idxs], P_TTVs[multi_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
 	ax2.scatter(P_plans[multi_idxs], P_TTVs[multi_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
@@ -574,18 +723,251 @@ try:
 
 
 
+	##### CREATE ONE GIANT PANEL -- (4x4) with 1) sims, 2) non-HL singles, 3) non-HL multis, 4) HL, and 
+	##### Pplan, PTTV, Amplitudes, DeltaBICs
+
+	#np.save(projectdir+'/sim_deltaBIC_list.npy', deltaBIC_list[good_BIC_stable_idxs])
+	#np.save(projectdir+'/sim_PTTVs.npy', P_TTVs)
+	#np.save(projectdir+'/sim_Pplans.npy', P_plans)
+
+	try:
+		sim_deltaBIC_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_deltaBIC_list.npy')
+		sim_PTTVs = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_PTTVs.npy')
+		sim_Pplans = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_Pplans.npy')
+		sim_TTV_amplitudes = np.load('/data/tethys/Dcuments/Projects/NMoon_TTVs/sim_TTV_amplitudes.npy')
+
+	except:
+		sim_deltaBIC_list = np.load(projectdir+'/sim_deltaBIC_list.npy')
+		sim_PTTVs = np.load(projectdir+'/sim_PTTVs.npy')
+		sim_Pplans = np.load(projectdir+'/sim_Pplans.npy')
+		sim_TTV_amplitudes = np.load(projectdir+'/sim_TTV_amplitudes.npy')
 
 
-	heatmap_column_sums = []
-	for i in np.arange(0,19,1):
-		heatmap_colsum = np.nansum(heatmap[i])
-		heatmap_column_sums.append(heatmap_colsum)
-	heatmap_column_sums = np.array(heatmap_column_sums)
+		#try:
+		#	sim_TTV_ampltiudes = np.load(projectdir+'/sim_TTV_amplitudes.npy')
+		#except:
+		#	sim_TTV_amplitudes = np.random.randint(low=0, high=1e3, size=len(sim_deltaBIC_list))+np.random.random(size=len(sim_deltaBIC_list))
 
-	heatmap_div_pplans = (heatmap.T / heatmap_column_sums).T
 
-	##### UNFORTUNATELY YOU CAN'T USE THE SAME FRAMEWORK AS BEFORE!
+	sim_TTV_amplitudes_minutes = sim_TTV_amplitudes / 60
+
+	single_notHL_idxs = np.intersect1d(notin_HLcatalog_idxs, single_idxs)
+	multi_notHL_idxs = np.intersect1d(notin_HLcatalog_idxs, multi_idxs)
+	multi_HL_idxs = np.intersect1d(in_HLcatalog_idxs, multi_idxs) #### should be the same as in_HLcatalog_idxs
+
+	deltaBIC_lists = [sim_deltaBIC_list, deltaBICs[single_notHL_idxs], deltaBICs[multi_notHL_idxs], deltaBICs[multi_HL_idxs]]
+	deltaBIC_bins = np.linspace(-100,-2,20)
 	
+	PTTV_lists = [sim_PTTVs, P_TTVs[single_notHL_idxs], P_TTVs[multi_notHL_idxs], P_TTVs[multi_HL_idxs]]
+	PTTV_bins = np.logspace(np.log10(2), np.log10(100), 20)
+	
+	TTVamp_lists = [sim_TTV_amplitudes_minutes, TTV_amplitudes[single_notHL_idxs], TTV_amplitudes[multi_notHL_idxs], TTV_amplitudes[multi_HL_idxs]]
+	TTVamp_bins = np.logspace(0,6,20)
+
+	#PTTV_over_Pplan_lists = [sim_PTTVs / sim_Pplans, P_TTVs[single_notHL_idxs]/P_plans[single_notHL_idxs], P_TTVs[multi_notHL_idxs]/P_plans[multi_notHL_idxs], P_TTVs[multi_HL_idxs] / P_plans[multi_HL_idxs]]
+	#PTTV_over_Pplan_bins = np.logspace(0,3,20)
+
+	Pplan_lists = [sim_Pplans, P_plans[single_notHL_idxs], P_plans[multi_notHL_idxs], P_plans[multi_HL_idxs]]
+	Pplan_bins = np.logspace(np.log10(1), np.log10(1500), 20)
+	#amp_over_mass_lists = [sim_AoverM, amplitudes_div_masses[single_notHL_idxs], amplitudes_div_masses[multi_notHL_idxs], amplitudes_div_masses[multi_HL_idxs]]
+
+
+	row_labels = ['moon sims', 'singles', 'multis', 'HL2017']
+	col_labels = [r'$P_{\mathrm{P}}$ [days]', r'$P_{\mathrm{TTV}}$ [epochs]', 'TTV amplitude [min]', r'$\Delta$BIC']
+	column_list_of_lists = [Pplan_lists, PTTV_lists, TTVamp_lists, deltaBIC_lists]
+	bin_lists = [Pplan_bins, PTTV_bins, TTVamp_bins, deltaBIC_bins]
+	axis_scales = ['log', 'log', 'log', 'linear']
+
+	colors = cm.viridis(np.linspace(0,1,len(bin_lists)))	
+
+	nrows = 4 #### sim, single, multi, HL
+	ncols = 4 #### Pplan, PTTV, deltaBIC
+
+	fig, ax = plt.subplots(nrows,ncols) ### might need to reverse this
+	#plt.figure(figsize=(8,8))
+	#gs1 = gridspec.Gridspec(nrows,ncols)
+	#gs1.update(hspace=0.05)
+
+	### coordinates are row (top=0), then column (left=0)
+	### rows are sim, non-HL single, non-HL multi, HL
+	### columns are Pplan, PTTV, DeltaBIC
+
+	for row in np.arange(0,nrows,1):
+		for col in np.arange(0,ncols,1):
+
+			ax[row][col].hist(column_list_of_lists[col][row], bins=bin_lists[col], facecolor=colors[col], edgecolor='k', alpha=0.5)
+			ax[row][col].set_xscale(axis_scales[col]) 
+			if col == ncols-1:
+				ax[row][col].yaxis.set_label_position("right")
+				#ax[row][col].yaxis.tick_right()
+				ax[row][col].set_ylabel(row_labels[row])
+
+			if row == nrows-1:
+				ax[row][col].set_xlabel(col_labels[col])
+
+			if row != nrows-1:
+				ax[row][col].set_xticklabels([])
+
+			#if col != 0:
+			#	ax[row][col].set_yticklabels([])
+
+			#ax[row][col].set_yticklabels([])
+
+	plt.tight_layout()
+	plt.show()
+
+
+
+
+	#### let's compute a bunch of KS values.
+	#### DO IT FOR HL against ALL, and HL against MULTIS.
+	#### values we will test are P_TTVs, deltaBICs, P_plans, 
+
+
+	ks_PTTV_allvsHL = kstest(P_TTVs[notin_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs])
+	ks_PTTV_multivsHL = kstest(P_TTVs[notin_HLcatalog_multi_idxs], P_TTVs[in_HLcatalog_idxs])
+	ks_Pplan_allvsHL = kstest(P_plans[notin_HLcatalog_idxs], P_plans[in_HLcatalog_idxs])
+	ks_Pplan_multivsHL = kstest(P_plans[notin_HLcatalog_multi_idxs], P_plans[in_HLcatalog_idxs])
+	ks_TTVamp_allvsHL = kstest(TTV_amplitudes[notin_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs])
+	ks_TTVamp_multivsHL = kstest(TTV_amplitudes[notin_HLcatalog_multi_idxs], TTV_amplitudes[in_HLcatalog_idxs])
+	#ks_forecast_masses_allvsHL = kstest(forecast_masses[notin_HLcatalog_idxs], forecast_masses[in_HLcatalog_idxs])
+	#ks_forecast_masses_multivsHL = kstest(forecast_masses[notin_HLcatalog_multi_idxs], forecast_masses[in_HLcatalog_idxs])
+	ks_radii_allvsHL = kstest(radii[notin_HLcatalog_idxs], radii[in_HLcatalog_idxs])
+	ks_radii_multivsHL = kstest(radii[notin_HLcatalog_multi_idxs], radii[in_HLcatalog_idxs])	
+
+	ks_Pip1_multivsHL = kstest(Pip1_over_Pis[notin_HLcatalog_idxs], Pip1_over_Pis[in_HLcatalog_idxs])
+	ks_Pi_over_Pim1s = kstest(Pi_over_Pim1s[notin_HLcatalog_idxs], Pi_over_Pim1s[in_HLcatalog_idxs])
+
+
+
+
+
+	sim_PTTVs = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_PTTVs.npy')
+	sim_Pplans = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_Pplans.npy')
+
+
+
+
+
+
+	#### 4 panel heatmaps
+
+	fig, ((ax1,ax2), (ax3, ax4)) = plt.subplots(nrows=2,ncols=2)
+	sim_heatmap = ax1.hist2d(sim_Pplans, sim_PTTVs, bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
+	ax1.scatter(sim_Pplans, sim_PTTVs, facecolor='w', edgecolor='k', alpha=0.2, s=10)
+	ax1.set_xscale('log')	
+	ax1.set_yscale('log')
+	
+	single_heatmap = ax2.hist2d(P_plans[single_idxs], P_TTVs[single_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
+	ax2.scatter(P_plans[single_idxs], P_TTVs[single_idxs], facecolor='w', edgecolor='k', alpha=0.2, s=10)
+	ax2.set_xscale('log')
+	ax2.set_yscale('log')
+
+	multi_nonHL_heatmap = ax3.hist2d(P_plans[notin_HLcatalog_multi_idxs], P_TTVs[notin_HLcatalog_multi_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
+	ax3.scatter(P_plans[notin_HLcatalog_multi_idxs], P_TTVs[notin_HLcatalog_multi_idxs], facecolor='w', edgecolor='k', alpha=0.2, s=10)
+	ax3.set_xscale('log')
+	ax3.set_yscale('log')
+
+	multi_HL_heatmap = ax4.hist2d(P_plans[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
+	ax4.scatter(P_plans[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], facecolor='w', edgecolor='k', alpha=0.2, s=10)
+	ax4.set_xscale('log')
+	ax4.set_yscale('log')
+	plt.show()
+
+
+
+	#### 
+	sim_heatmap_frac_of_Pplan = np.zeros(shape=sim_heatmap.shape)
+	single_heatmap_frac_of_Pplan = np.zeros(shape=single_heatmap.shape)
+	multi_nonHL_heatmap_frac_of_Pplan = np.zeros(shape=multi_nonHL_heatmap.shape)
+	multi_HL_heatmap_frac_of_Pplan = np.zeros(shape=multi_HL_heatmap.shape)
+
+	#### these will all be the same shape, so
+	nrows, ncols = sim_heatmap.shape
+
+	for col in np.arange(0,ncols,1):
+		#### divide each cell in the column by the sum of that column
+		#sim_heatmap_frac_of_Pplan[col] = sim_heatmap[col] / np.nansum(sim_heatmap[col])
+		##### NORMALIZE!!!!!
+		sim_heatmap_frac_of_Pplan[col] = (sim_heatmap[col] - np.nanmin(sim_heatmap[col])) / (np.nanmax(sim_heatmap[col]) - np.nanmin(sim_heatmap[col]))
+		#num_nonzero_cells = len(np.where(sim_heatmap[col] > 0)[0])
+		#sim_heatmap_frac_of_Pplan[col] = sim_heatmap_frac_of_Pplan[col] * num_nonzero_cells
+
+		#single_heatmap_frac_of_Pplan[col] = single_heatmap[col] / np.nansum(single_heatmap[col]) 
+		single_heatmap_frac_of_Pplan[col] = (single_heatmap[col] - np.nanmin(single_heatmap[col])) / (np.nanmax(single_heatmap[col]) - np.nanmin(single_heatmap[col]))
+		#num_nonzero_cells = len(np.where(single_heatmap[col] > 0)[0])
+		#single_heatmap_frac_of_Pplan[col] = single_heatmap_frac_of_Pplan[col] * num_nonzero_cells
+
+		#multi_nonHL_heatmap_frac_of_Pplan[col] = multi_nonHL_heatmap[col] / np.nansum(multi_nonHL_heatmap[col])
+		multi_nonHL_heatmap_frac_of_Pplan[col] = (multi_nonHL_heatmap[col] - np.nanmin(multi_nonHL_heatmap[col])) / (np.nanmax(multi_nonHL_heatmap[col]) - np.nanmin(multi_nonHL_heatmap[col]))
+		#num_nonzero_cells = len(np.where(multi_nonHL_heatmap[col] > 0)[0])
+		#multi_nonHL_heatmap_frac_of_Pplan[col] = multi_nonHL_heatmap_frac_of_Pplan[col] * num_nonzero_cells
+
+
+		#multi_HL_heatmap_frac_of_Pplan[col] = multi_HL_heatmap[col] / np.nansum(multi_HL_heatmap[col])
+		multi_HL_heatmap_frac_of_Pplan[col] = (multi_HL_heatmap[col] - np.nanmin(multi_HL_heatmap[col])) / (np.nanmax(multi_HL_heatmap[col]) - np.nanmin(multi_HL_heatmap[col]))
+		#num_nonzero_cells = len(np.where(multi_HL_heatmap[col] > 0)[0])
+		#multi_HL_heatmap_frac_of_Pplan[col] = multi_HL_heatmap_frac_of_Pplan[col] * num_nonzero_cells
+
+
+	
+	fig, ((ax1,ax2), (ax3, ax4)) = plt.subplots(nrows=2,ncols=2, sharex=True, sharey=True)
+	#### upper left
+	ax1.imshow(np.nan_to_num(sim_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+	ax1.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
+	ax1.set_yticks(np.arange(0,19,1)[::4])
+	ax1.set_yticklabels(np.around(np.log10(ycenters[::4]), 2))
+
+	#### upper right
+	ax2.imshow(np.nan_to_num(single_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+
+	#### lower left
+	ax3.imshow(np.nan_to_num(multi_nonHL_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+	ax3.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
+	ax3.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	ax3.set_xticks(np.arange(0,19,1)[::4])
+	ax3.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+	ax3.set_yticks(np.arange(0,19,1)[::4])
+	ax3.set_yticklabels(np.around(np.log10(ycenters[::4]),2))
+
+
+	#### lower right
+	ax4.imshow(np.nan_to_num(multi_HL_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+	ax4.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	ax4.set_xticks(np.arange(0,19,1)[::4])
+	ax4.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+	plt.show()
+
+
+
+
+
+
+	ax2.imshow(single_heatmap_frac_of_Pplan, origin='lower')
+
+
+	ax3.imshow(multi_nonHL_heatmap_frac_of_Pplan, origin='lower')
+	ax3.set_ylabel(r'$P_{\mathrm{TTV}}$ [epochs]')
+	ax3.set_xlabel(r'$P_{\mathrm{P}}$ [days]')
+
+
+
+	ax4.imshow(multi_HL_heatmap_frac_of_Pplan, origin='lower')
+	ax4.set_xlabel(r'$P_{\mathrm{P}}$ [days]')
+	plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

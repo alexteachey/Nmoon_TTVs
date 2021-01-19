@@ -16,6 +16,7 @@ from violin_plotter import create_violin
 
 
 
+
 def sinewave(tvals, frequency, offset):
 	return amplitude * np.sin(2*np.pi*frequency*tvals + offset)
 
@@ -26,6 +27,34 @@ def chisquare(data,model,error):
 def BIC(nparams,data,model,error):
 	return nparams*np.log(len(data)) + chisquare(data,model,error)
 
+
+def hmcontour(xvals, yvals, bins=[20,20], levels=5, colors='k'):
+	##### this function will take x and y data and output contours
+	##### it uses the heatmap function
+	xbins, ybins = bins
+	hm = plt.hist2d(xvals, yvals, bins=[xbins, ybins], cmap='coolwarm')
+	hm_vals, hm_xedges, hm_yedges, hm_qm = hm 
+	xcenters, ycenters, xcoords, ycoords = [], [], [], []
+	for nxe,xe in enumerate(hm_xedges):
+		try:	
+			xcenters.append(np.nanmean((hm_xedges[nxe+1], hm_xedges[nxe])))
+			xcoords.append(nxe)
+		except:
+			pass
+
+	for nye,ye in enumerate(hm_yedges):
+		try:
+			ycenters.append(np.nanmean((hm_yedges[nye+1], hm_yedges[nye])))
+			ycoords.append(nye)
+		except:
+			pass
+
+	#plt.clf()
+	#lt.cla()
+	contplot = plt.contour(xcoords, ycoords, hm_vals, levels=levels, colors=colors)	
+	plt.show()
+
+	return contplot 
 
 
 
@@ -58,6 +87,7 @@ try:
 		sim_num = int(input('What is the simulation number you want to see? '))
 		sims = np.array([sim_num])
 		show_individual_plots = 'y' 
+		fit_TTVs = 'y'
 
 
 
@@ -81,6 +111,29 @@ try:
 	nmoons = np.array(summaryfile['nmoons'])
 	megno_vals = np.array(summaryfile['MEGNO'])
 	spockprobs = np.array(summaryfile['SPOCK_survprop'])
+
+	#### DO THE MEGNO VS SPOCK PLOT HERE, COLOR CODE BY NUMBER OF MOONS
+	##### AND MAKE THE CUTS DYNAMIC
+	colors = cm.Accent(np.linspace(0,1,5))
+	#plt.plot(sim_smas_fracHill, sim_mass_ratios, color=colors[sim_nmoons-1], linewidth=2, zorder=0)
+	for nmoon in np.arange(3,6,1):
+		nmoon_idxs = np.where(nmoons == nmoon)[0]
+		plt.scatter(megno_vals[nmoon_idxs], spockprobs[nmoon_idxs], facecolor=colors[nmoon-1], edgecolor='k', s=20, alpha=0.5, label='N = '+str(nmoon), zorder=0)
+	plt.xlabel('MEGNO')
+	plt.ylabel('SPOCK probability')
+	plt.legend()
+	plt.show()
+
+	##### compute megno and spock limits
+	spock_min = 0.9
+	megnos_above_90 = megno_vals[spockprobs >= 0.9]
+	twosig_megno_limits = np.nanpercentile(megnos_above_90, 2.5), np.nanpercentile(megnos_above_90, 97.5)
+	megno_min, megno_max = twosig_megno_limits[0], twosig_megno_limits[1]
+
+
+
+
+
 
 	"""
 
@@ -205,7 +258,7 @@ try:
 
 
 
-
+	TTV_amplitudes = []
 
 	for sim in sims:
 		try:
@@ -277,6 +330,8 @@ try:
 				popt, pcov = curve_fit(sinewave, sim_TTV_epochs, sim_TTV_OminusC, sigma=sim_TTV_errors, bounds=([0, -2*np.pi], [10*sim_TTV_rmsamp, 2*np.pi]))
 				interp_epochs = np.linspace(np.nanmin(sim_TTV_epochs), np.nanmax(sim_TTV_epochs), 1000)
 				sinecurve = sinewave(interp_epochs, *popt)
+				sinecurve_amplitude = np.nanmax(np.abs(sinecurve))
+				TTV_amplitudes.append(sinecurve_amplitude)
 
 				BIC_flat = BIC(nparams=0, data=sim_TTV_OminusC, model=np.linspace(0,0,len(sim_TTV_OminusC)), error=sim_TTV_errors)
 				BIC_curve = BIC(nparams=2, data=sim_TTV_OminusC, model=sinewave(sim_TTV_epochs,*popt), error=sim_TTV_errors)
@@ -299,6 +354,12 @@ try:
 					plt.title(r'$P = $'+str(round(peak_power_period,2))+r' epochs, $N_{S} = $'+str(sim_nmoons)+r', $\Delta \mathrm{BIC} = $'+str(round(deltaBIC, 2)))
 					plt.show()
 
+					###### DO A PHASE FOLD -- AND REFIT THE SIN
+
+
+
+
+
 
 			fractional_delta_rvals = []
 			eccentricity_estimates = [] #### will not be exactly eccentricity, since you're not measuring a single orbit's apoapse and periapse.
@@ -311,6 +372,7 @@ try:
 				fractional_delta_rvals.append(fractional_delta_r)
 				eccentricity_swing = (max_rval - min_rval) / (max_rval + min_rval)
 
+				"""
 				if show_individual_plots == 'y':
 					plt.plot(tvals, rvals)
 					if i != 0:
@@ -322,7 +384,9 @@ try:
 					plt.ylabel(r'$R_{CoM}$')
 					plt.title("Moon "+str(i)+", MEGNO = "+str(round(sim_MEGNO,2))+r', $P_{\mathrm{spock}} = $'+str(round(sim_SPOCKprob,2)))
 				plt.show()    
+				"""
 			maximum_fractional_delta_r = np.nanmax(fractional_delta_rvals)
+
 			#max_fractional_delta_rvals.append(maximum_fractional_delta_r)  ### MOVED TO THE END, TO KEEP LISTS EVEN
 
 
@@ -334,8 +398,8 @@ try:
 				for particle in np.arange(0,nparticles,1):
 					part_xpos, part_ypos = sim_xpos[particle], sim_ypos[particle]
 					plt.plot(part_xpos, part_ypos, alpha=0.7)
-				plt.xlabel(r'$a / a_{I}$')
-				plt.ylabel(r'$a / a_{I}$')
+				plt.xlabel(r'$r / a_{I}$')
+				plt.ylabel(r'$r / a_{I}$')
 				plt.title("MEGNO = "+str(round(sim_MEGNO, 2))+', stability prob = '+str(round(sim_SPOCKprob*100,2))+'%')
 				plt.show()
 
@@ -375,103 +439,157 @@ try:
 
 
 
+
+
+
+
 	##### DATA CUTS
-	stable_megno_idxs = np.where((megno_vals >= 1.97) & (megno_vals <= 2.18))[0]
-	stable_spockprobs = np.where(spockprobs >= 0.9)[0] #### UPDATE BASED ON DEARTH OF P > 0.9 systems in the new paradigm.
-	unstable_megno_idxs = np.concatenate((np.where(megno_vals < 1.97)[0], np.where(megno_vals > 2.18)[0]))
-	unstable_spockprobs = np.where(spockprobs < 0.9)[0]
+	stable_megno_idxs = np.where((megno_vals >= megno_min) & (megno_vals <= megno_max))[0]
+	stable_spockprobs = np.where(spockprobs >= spock_min)[0] #### UPDATE BASED ON DEARTH OF P > 0.9 systems in the new paradigm.
+	unstable_megno_idxs = np.concatenate((np.where(megno_vals < megno_min)[0], np.where(megno_vals > megno_max)[0]))
+	unstable_spockprobs = np.where(spockprobs < spock_min)[0]
 	stable_idxs = []
+	unstable_idxs = []
 
 	#### STABILITY CHECK
 	for idx in np.arange(0,len(megno_vals),1):
 		if (idx in stable_spockprobs):
 			stable_idxs.append(idx) #### if SPOCK probability is good, we go with this
 		
-		elif (np.isfinite(spockprobs[idx]) == False) and (idx in stable_megno_idxs): ### if SPOCK prob is unavailable but the MEGNO is good, we go with this
-			stable_idxs.append(idx) 
-		
-		elif (spockprobs[idx] < 0.9) and (idx in stable_megno_idxs):
-			continue 
+		else:
+			#### it's not in stable_spockprobs
+			if np.isfinite(spockprobs[idx]) == True:
+				#### it's present, just not good enough
+				unstable_idxs.append(idx)
+
+			else:
+				if idx in stable_megno_idxs:
+					stable_idxs.append(idx)
+				else:
+					unstable_idxs.append(idx)
+
+
+
 	stable_idxs = np.array(stable_idxs)		
+	unstable_idxs = np.array(unstable_idxs)
 
 
-	#### CREATE A VIOLIN PLOT OF deltaBICs as a function of moons
-	violin_data = [[], [], [], [], []] #### a list of lists
-	for moonidx, nmoon in enumerate(np.arange(1,6,1)):
-		nmoon_idxs = np.where(nmoons == nmoon)[0]
-		nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
-		nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs].tolist()
-		violin_data[moonidx] = nmoon_deltaBICs
-	#create_violin(data, data_labels=None, x_label=None, y_label=None, plot_title=None, colormap='viridis')
-	create_violin(violin_data, data_labels=['1', '2', '3', '4','5'], x_label='# moons', y_label=r'$\Delta$ BIC', colormap='tab20c', autoshow=False)
-	plt.plot(np.linspace(0,6,100), np.linspace(-2,-2,100), c='k', linestyle=':', alpha=0.7)
-	plt.show()
+	try:
+		#### CREATE A VIOLIN PLOT OF deltaBICs as a function of moons
+		violin_data = [[], [], [], [], []] #### a list of lists
+		for moonidx, nmoon in enumerate(np.arange(1,6,1)):
+			nmoon_idxs = np.where(nmoons == nmoon)[0]
+			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
+			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs].tolist()
+			violin_data[moonidx] = nmoon_deltaBICs
+		#create_violin(data, data_labels=None, x_label=None, y_label=None, plot_title=None, colormap='viridis')
+		create_violin(violin_data, data_labels=['1', '2', '3', '4','5'], x_label='# moons', y_label=r'$\Delta$ BIC', colormap='tab20c', autoshow=False)
+		plt.plot(np.linspace(0,6,100), np.linspace(-2,-2,100), c='k', linestyle=':', alpha=0.7)
+		plt.show()
+	except:
+		print('could not produce the violin plot.')
 
 
+	"""
+	try:
+		##### PLOT stable and unstable systems for each architecture as a function of mass ratio
+		for nmoon in np.arange(1,6,1):
+			nmoon_idxs = np.where(nmoons == nmoon)[0]
+			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
+			nmoon_unstable_idxs = []
+			for nmidx in nmoon_idxs:
+				if nmidx not in nmoon_stable_idxs:
+					nmoon_unstable_idxs.append(nmidx)
 
-	#### PLOT DeltaBIC as a function of total moon mass, color coded by nmoons
-	colors = cm.get_cmap('Accent')(np.linspace(0,1,5))
+			plt.scatter(Msats_over_Mps[nmoon_unstable_idxs], np.linspace(nmoon, nmoon, len(nmoon_unstable_idxs)), facecolor='white', edgecolor='k', s=20, alpha=0.5)
+			plt.scatter(Msats_over_Mps[nmoon_stable_idxs], np.linspace(nmoon, nmoon, len(nmoon_stable_idxs)), facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5)
+		
+		plt.xlabel(r'$(\Sigma \, M_S) \, / \, M_P$')
+		plt.ylabel('# Moons')
+		plt.show()
 
-	for moonidx, nmoon in enumerate(np.arange(1,6,1)):
-		nmoon_idxs = np.where(nmoons == nmoon)[0]
-		nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
-		nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
-		nmoon_total_masses = Msats_over_Mps[nmoon_stable_idxs]
+	except:
+		print('could not plot stable and unstable moon mass ratios.')
+	"""
 
-		plt.scatter(nmoon_total_masses, nmoon_deltaBICs, facecolor=colors[moonidx], edgecolor='k', alpha=0.7, s=20, label='N = '+str(nmoon))
-	plt.plot(np.logspace(-5,-2,100), np.linspace(-2,-2,100), c='k', alpha=0.5, linestyle=':')
 
-	plt.xlabel(r'$(\Sigma \, M_S) / M_P$')
+	##### make stable and unstable heatmaps, and then divide stable by total
+	#nmoons_masses_heatmap = np.zeros(shape=(20,5))
+	mass_bin_edges = np.logspace(-5,-2,21)
+	moon_bin_edges = np.linspace(0.5,5.5,6) ### on the halves, because n=1 needs to go in the middle of the bin.
+	stable_heatmap = plt.hist2d(Msats_over_Mps[stable_idxs], nmoons[stable_idxs], bins=[mass_bin_edges, moon_bin_edges], cmap='coolwarm')[0]
+	plt.colorbar()
+	plt.title('All stable')
 	plt.xscale('log')
-	plt.ylabel(r'$\Delta$ BIC')
-	plt.legend(loc=3)
 	plt.show()
 
-
-
-
-
-
-	#### PLOT THE DELTA-rvals against megno and spock probs
-	fig, ax = plt.subplots(2)
-	ax[0].scatter(megno_vals[stable_megno_idxs], max_fractional_delta_rvals[stable_megno_idxs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
-	ax[0].scatter(megno_vals[unstable_megno_idxs], max_fractional_delta_rvals[unstable_megno_idxs], facecolor='LightCoral', edgecolor='k', alpha=0.7, s=20)
-	ax[0].set_xlabel('MEGNO')
-	ax[0].set_ylabel(r'max $(\Delta r / \overline{r})$')
-	ax[1].scatter(spockprobs[stable_spockprobs], max_fractional_delta_rvals[stable_spockprobs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
-	ax[1].scatter(spockprobs[unstable_spockprobs], max_fractional_delta_rvals[unstable_spockprobs], facecolor='LightCoral', edgecolor='k', alpha=0.7, s=20)
-	ax[1].set_xlabel(r'SPOCK $P_{\mathrm{stable}}$')
-	ax[1].set_ylabel(r'max $(\Delta r / \overline{r})$')
-	plt.show()
-
-
-	#### PLOT SPOCK PROBABILITIES AS A FUNCTION OF MSAT_OVER_MP -- color code by number of moons
-	#### break it up by number of moons!
-	for moon_number in np.arange(1,6,1):
-		nmoons_idxs = np.where(nmoons == moon_number)[0]
-		#plt.scatter(Msats_over_Mps[nmoons_stable_idxs], spockprobs[nmoons_stable_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
-		plt.scatter(Msats_over_Mps[nmoons_idxs], spockprobs[nmoons_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
-	plt.xlabel(r'$\frac{\Sigma M_S}{M_P} $')
-	plt.ylabel(r'$P_{\mathrm{stable}}$')
+	unstable_heatmap = plt.hist2d(Msats_over_Mps[unstable_idxs], nmoons[unstable_idxs], bins=[mass_bin_edges, moon_bin_edges], cmap='coolwarm')[0]	
+	plt.title('all unstable')
 	plt.xscale('log')
-	plt.legend()
-	plt.tight_layout()
+	plt.colorbar()
+	plt.show()
+
+	stable_over_total = stable_heatmap / (stable_heatmap + unstable_heatmap)
+	plt.figure(figsize=(4,4))
+	plt.imshow(stable_over_total.T, origin='lower', cmap='coolwarm', aspect='auto')
+	plt.xticks(ticks=np.linspace(0,20,5), labels=np.linspace(-5,-2,5))
+	plt.yticks(ticks=[0,1,2,3,4], labels=[1,2,3,4,5])
+	plt.xlabel(r'$\log_{10} \, (\Sigma M_{\mathrm{S}}) / M_{\mathrm{P}}$')
+	plt.ylabel('# moons')
+	#plt.xscale('log')
+	#plt.yscale('log')
+	cbar = plt.colorbar()
+	cbar.set_label('fraction stable')
+	#plt.title('Fraction stable')
 	plt.show()
 
 
-	##### DO THE SAME AS ABOVE, BUT FOR MEGNO #
-	#### break it up by number of moons!
-	for moon_number in np.arange(1,6,1):
-		nmoons_idxs = np.where(nmoons == moon_number)[0]
-		#plt.scatter(Msats_over_Mps[nmoons_stable_idxs], spockprobs[nmoons_stable_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
-		plt.scatter(Msats_over_Mps[nmoons_idxs], megno_vals[nmoons_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
-	plt.xlabel(r'$\frac{\Sigma \, M_S}{M_P} $')
-	plt.ylabel('MEGNO')
-	plt.xscale('log')
-	plt.yscale('log')
-	plt.legend()
-	plt.tight_layout()
-	plt.show() 
+
+
+
+
+
+
+	try:
+		#### PLOT DeltaBIC as a function of total moon mass, color coded by nmoons
+		colors = cm.get_cmap('Accent')(np.linspace(0,1,5))
+		color_idxs = np.linspace(0,1,5)
+
+		for moonidx, nmoon in enumerate(np.arange(1,6,1)):
+			nmoon_idxs = np.where(nmoons == nmoon)[0]
+			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
+			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+			nmoon_total_masses = Msats_over_Mps[nmoon_stable_idxs]
+
+			plt.scatter(nmoon_total_masses, nmoon_deltaBICs, facecolor=colors[moonidx], edgecolor='k', alpha=0.7, s=20, label='N = '+str(nmoon))
+		plt.plot(np.logspace(-5,-2,100), np.linspace(-2,-2,100), c='k', alpha=0.5, linestyle=':')
+
+		plt.xlabel(r'$(\Sigma \, M_S) / M_P$')
+		plt.xscale('log')
+		plt.ylabel(r'$\Delta$ BIC')
+		plt.legend(loc=3)
+		plt.show()
+
+
+		#### DO THE SAME THING AS ABOVE, BUT NOW WITH CONTOUR PLOTS!
+		for moonidx, nmoon in enumerate(np.arange(1,6,1)):
+			print('# moons = ', nmoon)
+			nmoon_idxs = np.where(nmoons == nmoon)[0]
+			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
+			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+			nmoon_total_masses = Msats_over_Mps[nmoon_stable_idxs]
+
+			#nmoon_contplot = hmcontour(nmoon_total_masses, nmoon_deltaBICs, colors=colors[moonidx])
+			color_array = np.linspace(cm.get_cmap('coolwarm')(color_idxs[moonidx]), cm.get_cmap('coolwarm')(color_idxs[moonidx]), 10)
+			nmoon_contplot = hmcontour(nmoon_total_masses, nmoon_deltaBICs, levels=10, colors=color_array)
+		
+		#plt.plot(np.logspace(-5,-2,100), np.linspace(-2,-2,100), c='k', alpha=0.5, linestyle=':')
+
+		plt.xlabel(r'$(\Sigma \, M_S) / M_P$')
+		plt.xscale('log')
+		plt.ylabel(r'$\Delta$ BIC')
+		plt.legend(loc=3)
+		plt.show()
 
 
 
@@ -480,42 +598,123 @@ try:
 
 
 
-	#### plot the inferred periods against the BIC values
-	plt.scatter(peak_power_periods_list[stable_idxs], deltaBIC_list[stable_idxs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
-	plt.xlabel('TTV period [epochs]')
-	plt.ylabel(r'$\Delta \mathrm{BIC}$')
-	plt.show()
-
-
-	##### DO THE SAME WITH THE TTV RMS AMPLITUDES
-	plt.scatter(np.array(summaryfile['TTV_rmsamp_sec'])[stable_idxs]/60, deltaBIC_list[stable_idxs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
-	plt.xlabel('TTV r.m.s. [minutes]')
-	plt.ylabel(r'$\Delta \mathrm{BIC}$')
-	plt.show()	
-
-
-	##### TTV RMS vs Planet Period
-	Pplans = np.array(summaryfile['Pplan_days']).astype(float)
-	plt.scatter(Pplans[stable_idxs], np.array(summaryfile['TTV_rmsamp_sec'])[stable_idxs]/60, facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
-	plt.xlabel(r'$P_P$ [days]')
-	plt.ylabel('TTV r.m.s. [minutes]')
-	plt.show()	
 
 
 
+		##### PLOT THE FRACTION OF DETECTABLE (deltaBIC <= -2) systems, as a function of mass
+		stable_detectable_idxs = np.intersect1d(stable_idxs, np.where(deltaBIC <= -2)[0])
+		stable_undetectable_idxs = np.intersect1d(stable_idxs, np.where(deltaBIC > -2)[0])
+		#### make a histogram of stable and detectable
+		stable_detectable_histogram = plt.hist(Msats_over_Mps[stable_detectable_idxs], bins=np.logspace(-5,-2,20), facecolor='DodgerBlue', edgecolor='k', alpha=0.5)
+		plt.title('stable and detectable')
+		plt.xlabel(r'$(\Sigma \, M_S) / M_P$')
+		plt.show()
 
-	#### break it up by number of moons!
-	for moon_number in np.arange(1,6,1):
-		nmoons_idxs = np.where(nmoons == moon_number)[0]
-		nmoons_stable_idxs = np.intersect1d(nmoons_idxs, stable_idxs)
-		plt.scatter(peak_power_periods_list[nmoons_stable_idxs], deltaBIC_list[nmoons_stable_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
-	plt.plot(np.linspace(2,500,1000), np.linspace(0,0,1000), c='k', linestyle='--')
-	plt.xlabel('TTV period [epochs]')
-	plt.ylabel(r'$\Delta \mathrm{BIC}$')
-	plt.xscale('log')
-	plt.legend()
-	plt.tight_layout()
-	plt.show()
+		stable_histogram = plt.hist(Msats_over_Mps, bins=np.logspace(-5,-2,20), facecolor='DodgerBlue', edgecolor='k', alpha=0.5)
+		plt.xlabel(r'$(\Sigma \, M_S) / M_P$')
+		plt.title('all stable')
+		plt.show()
+
+		#### PLOT FRACTION DETECTABLE
+		fraction_detectable = stable_detectable_histogram[0] / stable_histogram[0]
+		plt.plot(np.logspace(-5,-2,len(fraction_detectable)), fraction_detectable, color='LightCoral', linewidth=2)
+		plt.xlabel(r'$(\Sigma \, M_S) / M_P$')
+		plt.ylabel('Fraction Detectable')
+		plt.xscale('log')
+		plt.show()		
+
+
+
+
+
+	except:
+		print('could not plot deltaBIC as a function of total moon mass.')
+
+
+
+	try:
+
+		#### PLOT THE DELTA-rvals against megno and spock probs
+		fig, ax = plt.subplots(2)
+		ax[0].scatter(megno_vals[stable_megno_idxs], max_fractional_delta_rvals[stable_megno_idxs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
+		ax[0].scatter(megno_vals[unstable_megno_idxs], max_fractional_delta_rvals[unstable_megno_idxs], facecolor='LightCoral', edgecolor='k', alpha=0.7, s=20)
+		ax[0].set_xlabel('MEGNO')
+		ax[0].set_ylabel(r'max $(\Delta r / \overline{r})$')
+		ax[1].scatter(spockprobs[stable_spockprobs], max_fractional_delta_rvals[stable_spockprobs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
+		ax[1].scatter(spockprobs[unstable_spockprobs], max_fractional_delta_rvals[unstable_spockprobs], facecolor='LightCoral', edgecolor='k', alpha=0.7, s=20)
+		ax[1].set_xlabel(r'SPOCK $P_{\mathrm{stable}}$')
+		ax[1].set_ylabel(r'max $(\Delta r / \overline{r})$')
+		plt.show()
+
+
+		#### PLOT SPOCK PROBABILITIES AS A FUNCTION OF MSAT_OVER_MP -- color code by number of moons
+		#### break it up by number of moons!
+		for moon_number in np.arange(1,6,1):
+			nmoons_idxs = np.where(nmoons == moon_number)[0]
+			#plt.scatter(Msats_over_Mps[nmoons_stable_idxs], spockprobs[nmoons_stable_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
+			plt.scatter(Msats_over_Mps[nmoons_idxs], spockprobs[nmoons_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
+		plt.xlabel(r'$\frac{\Sigma M_S}{M_P} $')
+		plt.ylabel(r'$P_{\mathrm{stable}}$')
+		plt.xscale('log')
+		plt.legend()
+		plt.tight_layout()
+		plt.show()
+
+
+		##### DO THE SAME AS ABOVE, BUT FOR MEGNO #
+		#### break it up by number of moons!
+		for moon_number in np.arange(1,6,1):
+			nmoons_idxs = np.where(nmoons == moon_number)[0]
+			#plt.scatter(Msats_over_Mps[nmoons_stable_idxs], spockprobs[nmoons_stable_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
+			plt.scatter(Msats_over_Mps[nmoons_idxs], megno_vals[nmoons_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
+		plt.xlabel(r'$\frac{\Sigma \, M_S}{M_P} $')
+		plt.ylabel('MEGNO')
+		plt.xscale('log')
+		plt.yscale('log')
+		plt.legend()
+		plt.tight_layout()
+		plt.show() 
+
+
+		#### plot the inferred periods against the BIC values
+		plt.scatter(peak_power_periods_list[stable_idxs], deltaBIC_list[stable_idxs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
+		plt.xlabel('TTV period [epochs]')
+		plt.ylabel(r'$\Delta \mathrm{BIC}$')
+		plt.show()
+
+
+		##### DO THE SAME WITH THE TTV RMS AMPLITUDES
+		plt.scatter(np.array(summaryfile['TTV_rmsamp_sec'])[stable_idxs]/60, deltaBIC_list[stable_idxs], facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
+		plt.xlabel('TTV r.m.s. [minutes]')
+		plt.ylabel(r'$\Delta \mathrm{BIC}$')
+		plt.show()	
+
+
+		##### TTV RMS vs Planet Period
+		Pplans = np.array(summaryfile['Pplan_days']).astype(float)
+		plt.scatter(Pplans[stable_idxs], np.array(summaryfile['TTV_rmsamp_sec'])[stable_idxs]/60, facecolor='DodgerBlue', edgecolor='k', alpha=0.7, s=20)
+		plt.xlabel(r'$P_P$ [days]')
+		plt.ylabel('TTV r.m.s. [minutes]')
+		plt.show()	
+
+
+
+
+		#### break it up by number of moons!
+		for moon_number in np.arange(1,6,1):
+			nmoons_idxs = np.where(nmoons == moon_number)[0]
+			nmoons_stable_idxs = np.intersect1d(nmoons_idxs, stable_idxs)
+			plt.scatter(peak_power_periods_list[nmoons_stable_idxs], deltaBIC_list[nmoons_stable_idxs], edgecolor='k', alpha=0.5, s=20, label=str(moon_number))
+		plt.plot(np.linspace(2,500,1000), np.linspace(0,0,1000), c='k', linestyle='--')
+		plt.xlabel('TTV period [epochs]')
+		plt.ylabel(r'$\Delta \mathrm{BIC}$')
+		plt.xscale('log')
+		plt.legend()
+		plt.tight_layout()
+		plt.show()
+
+	except:
+		print('Could not produce other population plots.')
 
 
 
@@ -725,14 +924,14 @@ try:
 	ax1.plot(np.linspace(np.nanmedian(deltaBIC_list[stable_megno_idxs]),np.nanmedian(deltaBIC_list[stable_megno_idxs]),100), np.linspace(0,1.1*np.nanmax(n1),100), c='k', linestyle='--')
 	ax1.axvspan(-11, 0, alpha=0.2, color='green', zorder=0)
 	ax1.axvspan(0, 11, alpha=0.2, color='red', zorder=0)
-	ax1.set_ylabel(r'$1.97\leq \mathrm{MEGNO} \leq 2.18$')
+	ax1.set_ylabel(str(megno_min)+r'$\leq \mathrm{MEGNO} \leq $'+str(megno_max))
 	ax1.set_xlim(-10,10)
 	ax1.set_ylim(0,1.1*np.nanmax(n1))
 	n2,b2,e2 = ax2.hist(deltaBIC_list[stable_spockprobs], bins=np.arange(-10,11,1), facecolor='NavajoWhite', edgecolor='k', alpha=1, zorder=1)
 	ax2.plot(np.linspace(np.nanmedian(deltaBIC_list[stable_spockprobs]),np.nanmedian(deltaBIC_list[stable_spockprobs]),100), np.linspace(0,1.1*np.nanmax(n2),100), c='k', linestyle='--')
 	ax2.axvspan(-11, 0, alpha=0.2, color='green', zorder=0)
 	ax2.axvspan(0, 11, alpha=0.2, color='red', zorder=0)
-	ax2.set_ylabel(r'SPOCK $P_{\mathrm{stable}} \geq 0.9$')
+	ax2.set_ylabel(r'SPOCK $P_{\mathrm{stable}} \geq$'+str(spock_min))
 	ax2.set_xlim(-10,10)
 	ax2.set_ylim(0,1.1*np.nanmax(n2))
 	
@@ -771,14 +970,14 @@ try:
 	ax1.plot(np.linspace(np.nanmedian(deltaBIC_list[unstable_megno_idxs]),np.nanmedian(deltaBIC_list[unstable_megno_idxs]),100), np.linspace(0,1.1*np.nanmax(n1),100), c='k', linestyle='--')
 	ax1.axvspan(-11, 0, alpha=0.2, color='green', zorder=0)
 	ax1.axvspan(0, 11, alpha=0.2, color='red', zorder=0)
-	ax1.set_ylabel(r'$\mathrm{MEGNO} < 1.97 \, \mathrm{;} > 2.18$')
+	ax1.set_ylabel(r'$\mathrm{MEGNO} < '+str(megno_min)+' \, \mathrm{;} > $'+str(megno_max))
 	ax1.set_xlim(-10,10)
 	ax1.set_ylim(0,1.1*np.nanmax(n1))
 	n2,b2,e2 = ax2.hist(deltaBIC_list[unstable_spockprobs], bins=np.arange(-10,11,1), facecolor='NavajoWhite', edgecolor='k', alpha=1, zorder=1)
 	ax2.plot(np.linspace(np.nanmedian(deltaBIC_list[unstable_spockprobs]),np.nanmedian(deltaBIC_list[unstable_spockprobs]),100), np.linspace(0,1.1*np.nanmax(n2),100), c='k', linestyle='--')
 	ax2.axvspan(-11, 0, alpha=0.2, color='green', zorder=0)
 	ax2.axvspan(0, 11, alpha=0.2, color='red', zorder=0)
-	ax2.set_ylabel(r'SPOCK $P_{\mathrm{stable}} < 0.9$')
+	ax2.set_ylabel(r'SPOCK $P_{\mathrm{stable}} < $'+str(spock_min))
 	ax2.set_xlim(-10,10)
 	ax2.set_ylim(0,1.1*np.nanmax(n2))
 	
@@ -786,6 +985,16 @@ try:
 	ax1.set_title('unstable systems')
 	plt.tight_layout()
 	plt.show()
+
+
+	#### SAVE THIS STUFF
+	np.save(projectdir+'/sim_deltaBIC_list.npy', deltaBIC_list[good_BIC_stable_idxs])
+	np.save(projectdir+'/sim_PTTVs.npy', P_TTVs) #### these have already been culled as good_BIC_stable_idxs
+	np.save(projectdir+'/sim_Pplans.npy', P_plans)
+	np.save(projectdir+'/sim_TTV_amplitudes.npy', TTV_amplitudes[good_BIC_stable_idxs]) #### these need culling as such.
+	#P_plans = np.array(summaryfile['Pplan_days'])[good_BIC_stable_idxs]
+	#P_TTVs = peak_power_periods_list[good_BIC_stable_idxs]
+
 
 
 
