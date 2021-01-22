@@ -52,6 +52,43 @@ plotdir = projectdir+'/sim_plots'
 
 
 
+def TTVkiller(rms_amp, errors, Pplan, Tdur, unit='days', npoints=None):
+	### equation 20 from this paper: https://arxiv.org/pdf/2004.04230.pdf
+	"""
+	Errors should be array-like, or npoints must be specified.
+	Pplan and Tdur need to have the same units, as shoudl rms_amp and errors.
+
+	"""
+	LHS_num = rms_amp
+	errorbar = np.nanmedian(errors)
+	try:
+		npoints = len(errors)
+	except:
+		pass
+	LHS_denom = (np.sqrt(2) * errorbar) / np.sqrt(npoints) 
+	LHS = LHS_num / LHS_denom
+
+	RHS_first_term = np.sqrt(3) / (4*np.pi)
+	RHS_second_term = Pplan / Tdur 
+	RHS = RHS_first_term * RHS_second_term 
+
+	if LHS < RHS:
+		moon_possible = True
+	else:
+		moon_possible = False
+
+
+
+def fmin(mplan, mstar, A_TTV, Pplan, unit='minutes'):
+	#### units of A_TTV and Pplan have to be the same!
+
+	q = mplan / mstar 
+	first_term = 9 / (q**(1/3))
+	second_term = A_TTV / Pplan 
+	minimum_fRHill = first_term * second_term
+	return minimum_fRHill 
+	
+
 
 
 def n_choose_k(n,k):

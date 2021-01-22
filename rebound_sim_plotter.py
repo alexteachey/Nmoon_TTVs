@@ -331,7 +331,7 @@ try:
 				interp_epochs = np.linspace(np.nanmin(sim_TTV_epochs), np.nanmax(sim_TTV_epochs), 1000)
 				sinecurve = sinewave(interp_epochs, *popt)
 				sinecurve_amplitude = np.nanmax(np.abs(sinecurve))
-				TTV_amplitudes.append(sinecurve_amplitude)
+				#TTV_amplitudes.append(sinecurve_amplitude)
 
 				BIC_flat = BIC(nparams=0, data=sim_TTV_OminusC, model=np.linspace(0,0,len(sim_TTV_OminusC)), error=sim_TTV_errors)
 				BIC_curve = BIC(nparams=2, data=sim_TTV_OminusC, model=sinewave(sim_TTV_epochs,*popt), error=sim_TTV_errors)
@@ -346,15 +346,35 @@ try:
 				if show_individual_plots == 'y':
 					#### plot the TTVs -- and fit a best fitting SINUSOID BASED ON THE PERIODOGRAM PERIOD?
 					plt.scatter(sim_TTV_epochs, sim_TTV_OminusC, facecolor='LightCoral', edgecolor='k', s=20, zorder=2)
-					plt.errorbar(sim_TTV_epochs, sim_TTV_OminusC, yerr=sim_TTV_errors, ecolor='k', zorder=1, fmt='none')
-					plt.plot(np.linspace(np.nanmin(sim_TTV_epochs), np.nanmax(sim_TTV_epochs), 100), np.linspace(0,0,100), color='k', linestyle='--', zorder=0)
-					plt.plot(interp_epochs, sinecurve, c='r', linestyle=':', linewidth=2)
+					plt.errorbar(sim_TTV_epochs, sim_TTV_OminusC, yerr=sim_TTV_errors, ecolor='k', zorder=1, fmt='none', alpha=0.5)
+					plt.plot(np.linspace(np.nanmin(sim_TTV_epochs), np.nanmax(sim_TTV_epochs), 100), np.linspace(0,0,100), color='k', linestyle=':', zorder=0)
+					plt.plot(interp_epochs, sinecurve, c='r', linestyle='--', linewidth=3)
 					plt.xlabel('Epoch')
 					plt.ylabel('O - C [s]')
 					plt.title(r'$P = $'+str(round(peak_power_period,2))+r' epochs, $N_{S} = $'+str(sim_nmoons)+r', $\Delta \mathrm{BIC} = $'+str(round(deltaBIC, 2)))
 					plt.show()
 
 					###### DO A PHASE FOLD -- AND REFIT THE SIN
+					phasefold_sim_TTV_epochs = sim_TTV_epochs % (peak_power_period) #### to get two cycles.
+					phasefold_sort_args = np.argsort(phasefold_sim_TTV_epochs)
+					phasefold_sim_TTV_OminusC_sorted = sim_TTV_OminusC[phasefold_sort_args]
+					phasefold_sim_TTV_errors_sorted = sim_TTV_errors[phasefold_sort_args]
+					phasefold_sim_TTV_epochs_sorted = phasefold_sim_TTV_epochs[phasefold_sort_args]
+					phasefold_interp_epochs = np.linspace(np.nanmin(phasefold_sim_TTV_epochs_sorted), np.nanmax(phasefold_sim_TTV_epochs_sorted), 1000)
+					phasefold_sinecurve = sinewave(phasefold_interp_epochs, *popt)
+					phasefold_sinecurve_amplitude = np.nanmax(np.abs(phasefold_sinecurve))
+
+
+
+					plt.scatter(phasefold_sim_TTV_epochs_sorted, phasefold_sim_TTV_OminusC_sorted, facecolor='LightCoral', edgecolor='k', s=20, zorder=2)
+					plt.errorbar(phasefold_sim_TTV_epochs_sorted, phasefold_sim_TTV_OminusC_sorted, yerr=phasefold_sim_TTV_errors_sorted, ecolor='k', zorder=1, fmt='none', alpha=0.5)
+					plt.plot(np.linspace(np.nanmin(phasefold_sim_TTV_epochs_sorted), np.nanmax(phasefold_sim_TTV_epochs_sorted), 100), np.linspace(0,0,100), color='k', linestyle=':', zorder=0)
+					plt.plot(phasefold_interp_epochs, phasefold_sinecurve, c='r', linestyle='--', linewidth=3)
+					#plt.xlabel('Epoch')
+					plt.xlabel('epochs [phase fold]')
+					plt.ylabel('O - C [s]')
+					plt.title(r'$P = $'+str(round(peak_power_period,2))+r' epochs, $N_{S} = $'+str(sim_nmoons)+r', $\Delta \mathrm{BIC} = $'+str(round(deltaBIC, 2)))
+					plt.show()					
 
 
 
@@ -398,8 +418,8 @@ try:
 				for particle in np.arange(0,nparticles,1):
 					part_xpos, part_ypos = sim_xpos[particle], sim_ypos[particle]
 					plt.plot(part_xpos, part_ypos, alpha=0.7)
-				plt.xlabel(r'$r / a_{I}$')
-				plt.ylabel(r'$r / a_{I}$')
+				plt.xlabel(r'$r \, / \, a_{I}$')
+				plt.ylabel(r'$r \, / \, a_{I}$')
 				plt.title("MEGNO = "+str(round(sim_MEGNO, 2))+', stability prob = '+str(round(sim_SPOCKprob*100,2))+'%')
 				plt.show()
 
@@ -417,6 +437,7 @@ try:
 			deltaBIC_list.append(deltaBIC) #### MOVED TO THE END -- SO THAT YOUR INDEXING IS OK!
 			max_fractional_delta_rvals.append(maximum_fractional_delta_r)  ### MOVED TO THE END, TO KEEP LISTS EVEN
 			peak_power_periods_list.append(peak_power_period)
+			TTV_amplitudes.append(sinecurve_amplitude)
 
 		except:
 			#### APPENDING NaNs so we can keep all the lists the same length!
@@ -424,6 +445,7 @@ try:
 			deltaBIC_list.append(np.nan)
 			max_fractional_delta_rvals.append(np.nan) 
 			peak_power_periods_list.append(np.nan)
+			TTV_amplitudes.append(np.nan)
 
 
 			continue 
@@ -483,7 +505,7 @@ try:
 			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs].tolist()
 			violin_data[moonidx] = nmoon_deltaBICs
 		#create_violin(data, data_labels=None, x_label=None, y_label=None, plot_title=None, colormap='viridis')
-		create_violin(violin_data, data_labels=['1', '2', '3', '4','5'], x_label='# moons', y_label=r'$\Delta$ BIC', colormap='tab20c', autoshow=False)
+		create_violin(violin_data, data_labels=['1', '2', '3', '4','5'], x_label='# moons', y_label=r'$\Delta$ BIC', colormap='viridis', autoshow=False)
 		plt.plot(np.linspace(0,6,100), np.linspace(-2,-2,100), c='k', linestyle=':', alpha=0.7)
 		plt.show()
 	except:
@@ -737,6 +759,7 @@ try:
 		print('moon number = ', moon_number)
 		print('# of systems = ', len(nmoon_idxs))
 		print('# of these that are stable = ', len(nmoons_stable_idxs))
+		print('percent stable = ', len(nmoons_stable_idxs) / len(nmoon_idxs))
 		print('# stable with good BIC = ', len(nmoons_stable_good_BIC_idxs))
 		print(" ")
 		
@@ -987,6 +1010,7 @@ try:
 	plt.show()
 
 
+	TTV_amplitudes = np.array(TTV_amplitudes)
 	#### SAVE THIS STUFF
 	np.save(projectdir+'/sim_deltaBIC_list.npy', deltaBIC_list[good_BIC_stable_idxs])
 	np.save(projectdir+'/sim_PTTVs.npy', P_TTVs) #### these have already been culled as good_BIC_stable_idxs
@@ -994,6 +1018,33 @@ try:
 	np.save(projectdir+'/sim_TTV_amplitudes.npy', TTV_amplitudes[good_BIC_stable_idxs]) #### these need culling as such.
 	#P_plans = np.array(summaryfile['Pplan_days'])[good_BIC_stable_idxs]
 	#P_TTVs = peak_power_periods_list[good_BIC_stable_idxs]
+
+
+
+	detectable_idxs = np.where(deltaBIC_list <= -2)[0]
+
+	#### final statistics:
+	for nmoon in np.arange(1,6,1):
+		print("Moon #: ", nmoon)
+		nmoon_idxs = np.where(nmoons == nmoon)[0]
+		nmoon_deltaBICs = deltaBIC_list[nmoon_idxs]
+		nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
+		nmoon_stable_detectable_idxs = []
+		for nmoon_idx in nmoon_idxs:
+			if (nmoon_idx in stable_idxs) and (nmoon_idx in detectable_idxs):
+				nmoon_stable_detectable_idxs.append(nmoon_idx)
+		nmoon_stable_detectable_idxs = np.array(nmoon_stable_detectable_idxs)
+
+		print('# of moons: ', len(nmoon_idxs))
+		print("percent stable: ", len(nmoon_stable_idxs) / len(nmoon_idxs))
+		print("percent stable and detectable: ", len(nmoon_stable_detectable_idxs) / len(nmoon_idxs))
+		print('median P_TTV: ', np.nanmedian(peak_power_periods_list[nmoon_stable_detectable_idxs]))
+		#print("median A_TTV: ", np.nanmedian(TTV_amplitudes[nmoon_stable_detectable_idxs]))
+		print('median M_S / M_P: ', np.nanmedian(np.array(summaryfile['Mmoons_over_Mplan'])))
+		print(' ')
+		print(' ')
+
+
 
 
 
