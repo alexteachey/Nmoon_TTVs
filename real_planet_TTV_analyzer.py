@@ -17,6 +17,9 @@ from moonpy import *
 import socket
 from mr_forecast import Rstat2M
 from scipy.stats import kstest 
+from astropy.constants import M_sun, M_earth
+from sklearn.cluster import DBSCAN
+from scipy.stats import skew, kurtosis
 
 """
 #### THIS SCRIPT IS GOING TO PRODUCE ONE PLOT -- the plot of P_TTV vs P_plan. 
@@ -35,7 +38,7 @@ from scipy.stats import kstest
 """
 
 
-
+####### FILE DIRECTORY INFORMATION
 if socket.gethostname() == 'tethys.asiaa.sinica.edu.tw':
 	#projectdir = '/data/tethys/Documents/Projects/NMoon_TTVs'
 	projectdir = '/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs'
@@ -49,9 +52,11 @@ ttvfiledir = projectdir+'/sim_TTVs'
 LSdir = projectdir+'/sim_periodograms'
 modeldictdir = projectdir+'/sim_model_settings'
 plotdir = projectdir+'/sim_plots'
+###################################
 
 
 
+########## FUNCTION DEFINTIONS ####################
 def TTVkiller(rms_amp, errors, Pplan, Tdur, unit='days', npoints=None):
 	### equation 20 from this paper: https://arxiv.org/pdf/2004.04230.pdf
 	"""
@@ -77,18 +82,17 @@ def TTVkiller(rms_amp, errors, Pplan, Tdur, unit='days', npoints=None):
 	else:
 		moon_possible = False
 
-
-
 def fmin(mplan, mstar, A_TTV, Pplan, unit='minutes'):
 	#### units of A_TTV and Pplan have to be the same!
-
-	q = mplan / mstar 
+	if np.isfinite(mstar) and (mstar != 0) and type(mplan) != None:
+		q = mplan / mstar
+	else:
+		q = np.nan 
 	first_term = 9 / (q**(1/3))
 	second_term = A_TTV / Pplan 
 	minimum_fRHill = first_term * second_term
-	return minimum_fRHill 
-	
 
+	return minimum_fRHill, q, mplan, mstar, A_TTV, Pplan, first_term, second_term
 
 
 def n_choose_k(n,k):
@@ -96,38 +100,46 @@ def n_choose_k(n,k):
 	denominator = factorial(k) * factorial(n - k)
 	return numerator / denominator
 
-"""
-def binomial_probability(ntrials,nhits,phit):
-	#### computes an expectation value curve (ish) for nhits, based on ntrials and hit probability.
-	#### for example: if you have a coin with p(heads) = 0.5, and ntrials = 40, the curve maximum is at n=20.
-	#### it falls off on either side of that. Thus, if you have nhits = 10, you can read off the probability of getting that value
-	#### from the curve. (hint: it's low). 
-	#### if you want to compute the UNKNOWN VALUE phit, you will want to test a range of phits (with given ntrials and nhits), 
-	#### compute the curve, and find the phit for which the function you're calculating here is at maximum (~zero slope) 
-	#### for n = nhits. That is, whatever you pulled out is the maximum probability value, and the uncertainty comes from that.
-	#### you need to think about your application carefully before applying this.
-"""
-
 def chisquare(data, model, errors):
 	return np.nansum(((data - model)**2) / errors**2)
+
+
+########### END FUNCTION DEFINTIONS ###############################
+
+
+
+
 
 
 
 try:
 
+
 	show_plots = input('Do you want to show plots (for debugging)? y/n: ')
 
-	OCfile = pandas.read_csv('/data/tethys/Documents/Software/MoonPy/Table3_O-C.csv')
-	KOIs = np.array(OCfile['KOI']).astype(str)
-	epochs = np.array(OCfile['n']).astype(int)
-	OCmin = np.array(OCfile['O-C_min']).astype(str)
-	OCmin_err = np.array(OCfile['O-C_err']).astype(str)
+
+	cross_validate_LSPs = input("Do you want to run Lomb-Scargle cross-validation (removing points and recomputing)? ")
+	if cross_validate_LSPs == 'y':
+		cv_frac_to_leave_out = 0.05 #### five percent
+		cv_ntrials = int(1/cv_frac_to_leave_out) ### 20 trials
+	elif cross_validate_LSPs == 'n':
+		### just do a single trial
+		cv_frac_to_leave_out = 0
+		cv_ntrials = 1
 
 
-	### PURGE THOSE GODDAMN SPECIAL CHARACTERS OUT OF OCmin and OCmin_err
-	OCmin_clean, OCmin_err_clean = [], []
+	################ LOAD TTVs ##################################
 
-	for OC, OCerr in zip(OCmin, OCmin_err):
+	Holczer_OCfile = pandas.read_csv('/data/tethys/Documents/Software/MoonPy/Table3_O-C.csv')
+	Holczer_KOIs = np.array(Holczer_OCfile['KOI']).astype(str)
+	Holczer_epochs = np.array(Holczer_OCfile['n']).astype(int)
+	Holczer_OCmin = np.array(Holczer_OCfile['O-C_min']).astype(str)
+	Holczer_OCmin_err = np.array(Holczer_OCfile['O-C_err']).astype(str)
+
+	### PURGE THOSE GODDAMN SPECIAL CHARACTERS OUT OF Holczer_OCmin and Holczer_OCmin_err
+	Holczer_OCmin_clean, Holczer_OCmin_err_clean = [], []
+
+	for OC, OCerr in zip(Holczer_OCmin, Holczer_OCmin_err):
 		### THIS NASTY NESTED FOR LOOP IS BROUGHT TO YOU BY USING NON-NUMERIC CHARACTERS IN A NUMERIC COLUMN INSTEAD OF USING FLAGS.
 		OCclean = ''
 		for val in OC:
@@ -135,7 +147,7 @@ try:
 				OCclean = OCclean+val
 			else:
 				pass
-		OCmin_clean.append(float(OCclean))
+		Holczer_OCmin_clean.append(float(OCclean))
 
 		OCerrclean = ''	
 		for val in OCerr:
@@ -143,60 +155,62 @@ try:
 				OCerrclean = OCerrclean+val
 			else:
 				pass
-		OCmin_err_clean.append(float(OCerrclean))
+		Holczer_OCmin_err_clean.append(float(OCerrclean))
 
-	OCmin = np.array(OCmin_clean)
-	OCmin_err = np.array(OCmin_err_clean)
+	Holczer_OCmin = np.array(Holczer_OCmin_clean)
+	Holczer_OCmin_err = np.array(Holczer_OCmin_err_clean)
 
-
-	unique_KOIs = np.unique(KOIs)
-
+	Holczer_unique_KOIs = np.unique(Holczer_KOIs)
 
 
+	#### LOAD TKS (GOSE PROJECT) TTVs (Teachey, Kipping & Schmitt) ################################
+	TKS_OCfile = pandas.read_csv('/data/tethys/Documents/Central_Data/GOSE_TTV_summaryfile.csv')
+	TKS_KOIs = np.array(TKS_OCfile['KOI']).astype(str)
+	TKS_KOI_nums = []
+	for TKS_KOI in TKS_KOIs:
+		TKS_KOI_nums.append(str(TKS_KOI[4:]))
+	TKS_KOIs = np.array(TKS_KOI_nums).astype(str)
+	TKS_epochs = np.array(TKS_OCfile['epoch']).astype(int)
+	TKS_OCmin = np.array(TKS_OCfile['OC_min']).astype(str)
+	TKS_OCmin_err = np.array(TKS_OCfile['OCmin_err']).astype(str)
+	TKS_unique_KOIs = np.unique(TKS_KOIs)
+
+	use_Holczer_or_gose = input("Do you want to use 'h'olczer TTVs or 'g'ose (TKS) TTVs? ")
+	if use_Holczer_or_gose == 'h':
+		OCfile = Holczer_OCfile
+		KOIs = Holczer_KOIs
+		epochs = Holczer_epochs
+		OCmin = Holczer_OCmin
+		OCmin_err = Holczer_OCmin_err
+		unique_KOIs = Holczer_unique_KOIs
+
+	elif use_Holczer_or_gose == 'g':
+		OCfile = TKS_OCfile
+		KOIs = TKS_KOIs
+		epochs = TKS_epochs
+		OCmin = TKS_OCmin
+		OCmin_err = TKS_OCmin_err
+		unique_KOIs = TKS_unique_KOIs
+
+	############# END LOADING TTVS ######################################
 
 
-	cumkois = ascii.read('/data/tethys/Documents/Software/MoonPy/cumkois.txt')
+	################ LOAD THE CUMULATIVE KOI FILE FROM MAST #########################
+	################### AND PERFORM SOME SIMPLE CALCULATIONS ON THEM ###################
+	cumkois = ascii.read('/data/tethys/Documents/Software/MoonPy/cumkois_mast.txt')
 	kepler_names = np.array(cumkois['kepler_name'])
 	kepois = np.array(cumkois['kepoi_name'])
 	kepoi_periods = np.array(cumkois['koi_period'])
+	dispositions = np.array(cumkois['koi_disposition'])
 	kepler_radius_rearth = np.array(cumkois['koi_prad'])
 	kepler_radius_rearth_uperr = np.array(cumkois['koi_prad_err1'])
 	kepler_radius_rearth_lowerr = np.array(cumkois['koi_prad_err2'])
 	kepler_radius_rearth_err = np.nanmean((kepler_radius_rearth_uperr, np.abs(kepler_radius_rearth_lowerr)), axis=0)
-
-
-	##### FIND THE HADDEN & LITHWICK KOIs.
-	try:
-		HL_KOIs = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/Hadden_Lithwick_posteriors/HLKOIs.npy')
-		print('loaded HL_KOIs...')
-	
-	except:
-		HL_KOIs = []
-		print('generating HL_KOIs...')
-		HLplanet_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/Hadden_Lithwick_posteriors/HLplanet_list.npy')
-		for HLplanet in HLplanet_list:
-			if HLplanet.startswith('Kepler'):
-				#### find the kepoi in cumkois:
-				HLplanet_proper_format = HLplanet[:-1]+' '+HLplanet[-1]
-				if HLplanet_proper_format.startswith('Kepler-25') or HLplanet_proper_format.startswith('Kepler-89') or HLplanet_proper_format.startswith('Kepler-444'):
-					HLplanet_proper_format = HLplanet_proper_format[:-2]+' A '+HLplanet_proper_format[-1]
-				HL_kepoi_idx = np.where(kepler_names == HLplanet_proper_format)[0]
-				HL_kepoi = kepois[HL_kepoi_idx]
-			else:
-				HL_kepoi = HLplanet #### of the form K0001.01, etc
-
-			if type(HL_kepoi) == np.ndarray:
-				HL_kepoi = HL_kepoi[0]
-			HL_KOI = HL_kepoi
-			while HL_KOI.startswith('K') or HL_KOI.startswith('0'):
-				HL_KOI = HL_KOI[1:]
-			HL_KOI = 'KOI-'+HL_KOI
-			HL_KOIs.append(HL_KOI)
-		HL_KOIs = np.array(HL_KOIs)
-		assert len(HL_KOIs) == len(HLplanet_list)
-		np.save('/data/tethys/Documents/Projects/NMoon_TTVs/Hadden_Lithwick_posteriors/HLKOIs.npy', HL_KOIs)
-
-
+	kepler_solar_mass = np.array(cumkois['koi_smass'])
+	kepler_solar_mass_uperr = np.array(cumkois['koi_smass_err1'])
+	kepler_solar_mass_lowerr = np.array(cumkois['koi_smass_err2'])
+	kepler_solar_mass_err = np.nanmean((np.abs(kepler_solar_mass_uperr), np.abs(kepler_solar_mass_lowerr)), axis=0)
+	FP_idxs = np.where(dispositions == 'FALSE POSITIVE')[0]
 	kepoi_nums = []
 	system_nums = []
 	for kepoi in kepois:
@@ -236,7 +250,6 @@ try:
 		except:
 			next_lowest_period = np.nan 
 
-
 		this_planet_Pip1_over_Pi = next_highest_period / this_planet_period
 		this_planet_Pi_over_Pim1 = this_planet_period / next_lowest_period
 
@@ -245,9 +258,6 @@ try:
 
 		kepoi_multi_Pip1_over_Pis.append(this_planet_Pip1_over_Pi)
 		kepoi_multi_Pi_over_Pim1s.append(this_planet_Pi_over_Pim1)
-
-
-		#
 
 		nplanets_in_system = len(all_system_planet_idxs)
 		if nplanets_in_system > 1:
@@ -260,23 +270,124 @@ try:
 	kepoi_multi = np.array(kepoi_multi)
 	kepoi_multi_Pip1_over_Pis = np.array(kepoi_multi_Pip1_over_Pis)
 	kepoi_multi_Pi_over_Pim1s = np.array(kepoi_multi_Pi_over_Pim1s)
+	########### END CUMULATIVE KOI LOADING AND MANIPULATION ######################################
+
+
+
+
+	#### LOAD THE CROSS-VALIDATION FILES (GENERATED IN THIS SAME SCRIPT, LATER) ######################
+	try:
+		########## LOAD THE CROSS-VALIDATION RESULTS (HOLCZER) ###############################
+		Holczer_crossvalfile = pandas.read_csv('/data/tethys/Documents/Projects/NMoon_TTVs/Holczer_PTTV_results.csv')
+		Holczer_cv_KOI = np.array(Holczer_crossvalfile['KOI']).astype(str) #### of the form 1.01
+		Holczer_cv_PTTV_pcterr = np.array(Holczer_crossvalfile['PTTV_pcterr']).astype(float)
+		Holczer_cv_ATTV_pcterr = np.array(Holczer_crossvalfile['ATTV_pcterr']).astype(float)
+		Holczer_cv_phase_pcterr = np.array(Holczer_crossvalfile['phase_pcterr']).astype(float)
+		Holczer_cv_good_idxs = []
+		for i in np.arange(0,len(Holczer_cv_KOI),1):
+			if (Holczer_cv_PTTV_pcterr[i] <= 5) and (Holczer_cv_ATTV_pcterr[i] <= 5) and (Holczer_cv_phase_pcterr[i] <= 5):
+				Holczer_cv_good_idxs.append(i)
+		loaded_holczer_crossvalfile = 'y'
+		
+	except:
+		loaded_holczer_crossvalfile = 'n'
+
+	try:
+		#### LOAD THE CROSS-VALIDATION RESULTS (TKS) ########################################
+		TKS_crossvalfile = pandas.read_csv('/data/tethys/Documents/Projects/NMoon_TTVs/GOSE_PTTV_results.csv')
+		TKS_cv_KOI = np.array(TKS_crossvalfile['KOI']).astype(str) #### of the form 1.01
+		TKS_cv_PTTV_pcterr = np.array(TKS_crossvalfile['PTTV_pcterr']).astype(float)
+		TKS_cv_ATTV_pcterr = np.array(TKS_crossvalfile['ATTV_pcterr']).astype(float)
+		TKS_cv_phase_pcterr = np.array(TKS_crossvalfile['phase_pcterr']).astype(float)
+		TKS_cv_good_idxs = []
+		for i in np.arange(0,len(TKS_cv_KOI),1):
+			if (TKS_cv_PTTV_pcterr[i] <= 5) and (TKS_cv_ATTV_pcterr[i] <= 5) and (TKS_cv_phase_pcterr[i] <= 5):
+				TKS_cv_good_idxs.append(i)
+		loaded_TKS_crossvalfile = 'y'
+
+	except:
+		loaded_TKS_crossvalfile = 'n'
+
+	try:
+		#### LOAD THE CROSS-VALIDATION RESULTS (SIMULATIONS) #############################
+		sim_crossvalfile = pandas.read_csv('/data/tethys/Documents/Projects/NMoon_TTVs/sim_PTTV_results.csv')
+		sim_cv_KOI = np.array(sim_crossvalfile['KOI']).astype(str) #### of the form 1.01
+		sim_cv_PTTV_pcterr = np.array(sim_crossvalfile['PTTV_pcterr']).astype(float)
+		sim_cv_ATTV_pcterr = np.array(sim_crossvalfile['ATTV_pcterr']).astype(float)
+		sim_cv_phase_pcterr = np.array(sim_crossvalfile['phase_pcterr']).astype(float)
+		sim_cv_good_idxs = []
+		for i in np.arange(0,len(sim_cv_KOI),1):
+			if (sim_cv_PTTV_pcterr[i] <= 5) and (sim_cv_ATTV_pcterr[i] <= 5) and (sim_cv_phase_pcterr[i] <= 5):
+				sim_cv_good_idxs.append(i)
+		loaded_sim_crossvalfile = 'y'
+
+	except:
+		loaded_sim_crossvalfile = 'n'
 
 
 
 
 
+	##### FIND THE HADDEN & LITHWICK KOIs ###############################################################
+	try:
+		HL_KOIs = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/Hadden_Lithwick_posteriors/HLKOIs.npy')
+		print('loaded HL_KOIs...')
+	
+	except:
+		HL_KOIs = []
+		print('generating HL_KOIs...')
+		HLplanet_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/Hadden_Lithwick_posteriors/HLplanet_list.npy')
+		for HLplanet in HLplanet_list:
+			if HLplanet.startswith('Kepler'):
+				#### find the kepoi in cumkois:
+				HLplanet_proper_format = HLplanet[:-1]+' '+HLplanet[-1]
+				if HLplanet_proper_format.startswith('Kepler-25') or HLplanet_proper_format.startswith('Kepler-89') or HLplanet_proper_format.startswith('Kepler-444'):
+					HLplanet_proper_format = HLplanet_proper_format[:-2]+' A '+HLplanet_proper_format[-1]
+				HL_kepoi_idx = np.where(kepler_names == HLplanet_proper_format)[0]
+				HL_kepoi = kepois[HL_kepoi_idx]
+			else:
+				HL_kepoi = HLplanet #### of the form K0001.01, etc
+
+			if type(HL_kepoi) == np.ndarray:
+				HL_kepoi = HL_kepoi[0]
+			HL_KOI = HL_kepoi
+			while HL_KOI.startswith('K') or HL_KOI.startswith('0'):
+				HL_KOI = HL_KOI[1:]
+			HL_KOI = 'KOI-'+HL_KOI
+			HL_KOIs.append(HL_KOI)
+		HL_KOIs = np.array(HL_KOIs)
+		assert len(HL_KOIs) == len(HLplanet_list)
+		np.save('/data/tethys/Documents/Projects/NMoon_TTVs/Hadden_Lithwick_posteriors/HLKOIs.npy', HL_KOIs)
+	##### END PULLING OUT THE HADDEN & LITHWICK KOIS ###########################################
 
 
 
-	##### GENERATE LISTS 
+	############### LOAD FORECASTER RESULTS ###########################################################
+	forecaster_MRfile = pandas.read_csv('/data/tethys/Documents/Central_Data/cumkoi_forecast_masses.csv')
+	forecaster_KOIs = np.array(forecaster_MRfile['KOI']).astype(str)
+	forecaster_mass_mearth = np.array(forecaster_MRfile['mass_mearth'])
+	forecaster_mass_uperr = np.array(forecaster_MRfile['mass_mearth_uperr'])
+	forecaster_mass_lowerr = np.array(forecaster_MRfile['mass_mearth_lowerr']) ### NEGATIVE NUMBER!!!
+	#################### END LOAD FORECASTER RESULTS ###################################################
+
+
+
+
+
+	##### GENERATE LISTS IN THE BIG FOR LOOP BELOW #########################################################
 
 	radii = [] #### EARTH RADII
 	radii_errors = []
+	stellar_masses = []
+	stellar_masses_errors = []
 	P_TTVs = []
 	P_plans = []
 	deltaBICs = []
 	Pip1_over_Pis = []
 	Pi_over_Pim1s = []
+	forecast_masses = []
+	forecast_masses_uperr = []
+	forecast_masses_lowerr = []
 
 	TTV_amplitudes = []
 	single_idxs = []
@@ -284,55 +395,109 @@ try:
 	in_HLcatalog_idxs = []
 	notin_HLcatalog_idxs = []
 
+	cv_PTTV_pcterrs = []
+	cv_ATTV_pcterrs = []
+	cv_phase_pcterrs = []
 
+
+
+
+	######## PREPARE PTTV RESULTS FILES (CROSS-VALIDATION TESTS)
+	if use_Holczer_or_gose == 'h':
+		PTTV_resultsname = 'Holczer_PTTV_results.csv'
+	elif use_Holczer_or_gose == 'g':
+		PTTV_resultsname = 'GOSE_PTTV_results.csv'
+
+	if cross_validate_LSPs == 'y':
+		if os.path.exists('/data/tethys/Documents/Projects/NMoon_TTVs/'+PTTV_resultsname):
+			### find last record KOI number:
+			crossvalfile = pandas.read_csv('/data/tethys/Documents/Projects/NMoon_TTVs/'+PTTV_resultsname)
+			cv_kepois_examined = np.array(crossvalfile['KOI']).astype(str)
+
+		else:
+			crossval_resultsfile = open('/data/tethys/Documents/Projects/NMoon_TTVs/'+PTTV_resultsname, mode='w')
+			crossval_resultsfile.write('KOI,n_crossval_trials,n_epochs,n_removed,PTTV_median,PTTV_std,PTTV_skew,PTTV_kurtosis,PTTV_pcterr,ATTV_median,ATTV_std,ATTV_pcterr,phase_median,phase_std,phase_pcterr,deltaBIC,deltaBIC_std\n')
+			crossval_resultsfile.close()
+			cv_kepois_examined = np.array([])
+
+	else:
+		cv_kepois_examined = np.array([])
+	##### END PREPARE PTTV RESULTS FILES (CROSS-VALIDATION TESTS)
+
+
+
+
+
+	################### BIG ANALYSIS FOR LOOP ###################################
 	entrynum = 0
 	for nkepoi, kepoi in enumerate(kepois):
 
+		if (cross_validate_LSPs == 'y') and (str(kepoi) in cv_kepois_examined):
+			print('ALREADY EXAMINED. SKIPPING.')
+			continue
+
+		if nkepoi in FP_idxs:
+			print('Skipping false positive: ', kepoi)
+			print(' ')
+			continue
+
+
+		##### FIND THE CROSS-VALIDATION INDICES FOR THIS TARGET
+		if loaded_holczer_crossvalfile == 'y':
+			holczer_cv_holczer_match_idx = np.where(kepoi == Holczer_cv_KOI)[0]
+			holczer_cv_period_pct_error = Holczer_cv_PTTV_pcterr[cv_holczer_match_idx]
+			holczer_cv_amplitude_pct_error = Holczer_cv_ATTV_pcterr[cv_holczer_match_idx]
+			holczer_cv_phase_pct_error = Holczer_cv_phase_pcterr[cv_holczer_match_idx]
+
+		if loaded_TKS_crossvalfile == 'y':
+			cv_TKS_match_idx = np.where(kepoi == TKS_cv_KOI)[0]
+			TKS_cv_holczer_match_idx = np.where(kepoi == TKS_cv_KOI)[0]
+			TKS_cv_period_pct_error = TKS_cv_PTTV_pcterr[cv_TKS_match_idx]
+			TKS_cv_amplitude_pct_error = TKS_cv_ATTV_pcterr[cv_TKS_match_idx]
+			TKS_cv_phase_pct_error = TKS_cv_phase_pcterr[cv_TKS_match_idx]
+
+
+
+
+		#### FIND THE FORECASTER ENTRY FOR THIS OBJECT ##########################
+		forecaster_idx = int(np.where(forecaster_KOIs == kepoi)[0])
+		print('nkepoi, forecaster_idx = ', nkepoi, forecaster_idx)
+		forecast_mass = forecaster_mass_mearth[forecaster_idx]
+		forecast_mass_uperr = np.abs(forecaster_mass_uperr[forecaster_idx])
+		forecast_mass_lowerr = np.abs(forecaster_mass_lowerr[forecaster_idx])
+
 		try:
 			kepoi_period = kepoi_periods[nkepoi]
-			#if kepoi_period <= 10:
-			#	### we're not interested in these!
-			#	continue 
-
 			print('KOI-'+str(kepoi))
 			KOI_idxs = np.where(KOIs == kepoi)[0]
+
 			if len(KOI_idxs) == 0:
 				#### it's not in the catalog! Continue!
 				continue
 
-			KOI_epochs, KOI_OCs, KOI_OCerrs = epochs[KOI_idxs], OCmin[KOI_idxs], OCmin_err[KOI_idxs]
+			KOI_epochs, KOI_OCs, KOI_OCerrs = np.array(epochs[KOI_idxs]).astype(int), np.array(OCmin[KOI_idxs]).astype(float), np.array(OCmin_err[KOI_idxs]).astype(float)
 			KOI_rms = np.sqrt(np.nanmean(KOI_OCs**2))
 			orig_KOI_rms = KOI_rms
 
-			non_outlier_idxs = np.where(np.abs(KOI_OCs) <= np.sqrt(2)*KOI_rms)[0]
-			#non_outlier_idxs = np.where((np.abs(KOI_OCs) - 10*KOI_OCerrs) > KOI_rms)[0]
-			KOI_epochs, KOI_OCs, KOI_OCerrs = KOI_epochs[non_outlier_idxs], KOI_OCs[non_outlier_idxs], KOI_OCerrs[non_outlier_idxs]
+
+			##### OUTLIER REJECTION #########################################################
+			DBSCAN_vector = np.vstack((KOI_epochs, KOI_OCs)).T 
+			db = DBSCAN(eps=5*np.nanmedian(KOI_OCerrs), min_samples=int(len(KOI_epochs)/5)).fit(KOI_OCs.reshape(-1,1))			
+			labels = db.labels_ 
+			outlier_idxs = np.where(labels == -1)[0]
+			KOI_epochs, KOI_OCs, KOI_OCerrs = np.delete(KOI_epochs, outlier_idxs), np.delete(KOI_OCs, outlier_idxs), np.delete(KOI_OCerrs, outlier_idxs)
 			KOI_rms = np.sqrt(np.nanmean(KOI_OCs**2))
 
 
-
-			### run a Lomb-Scargle periodogram on this -- let the range be 2-500 epochs, 5000 logarithmically spaced bins.
-
+			##### PERFORM A LOMB-SCARGLE PERIODOGRAM ON THE ENTIRE SAMPLE OF TRANSIT TIMES ########################
 			LSperiods = np.logspace(np.log10(2), np.log10(500), 5000)
 			LSfreqs = 1/LSperiods
-			LSpowers = LombScargle(KOI_epochs, KOI_OCs, KOI_OCerrs).power(LSfreqs)
+			LSpowers = LombScargle(cv_KOI_epochs, cv_KOI_OCs, cv_KOI_OCerrs).power(LSfreqs)
 			peak_power_idx = np.nanargmax(LSpowers)
 			peak_power_period = LSperiods[peak_power_idx]
 			peak_power_freq = 1/peak_power_period
 
-
-			"""
-			if show_plots == 'y':
-				plt.plot(LSperiods, LSpowers, color='DodgerBlue', alpha=0.7, linewidth=2)
-				plt.xlabel('Period [epochs]')
-				plt.ylabel('Power')
-				plt.xscale('log')
-				plt.title('KOI-'+str(kepoi))
-				plt.show()
-			"""
-
-			#### NOW FIT A SINUSOID! ### FIX THE FREQUENCY -- have to define the function anew each step to do the curve fit
-
+			### NOW FIT A SINUSOID -- HAVE TO DEFINE IT LIKE THIS TO UTILIZE curve_fit()
 			def sinecurve(tvals, amplitude, phase):
 				angfreq = 2 * np.pi * peak_power_freq
 				sinewave = amplitude * np.sin(angfreq * tvals + phase)
@@ -340,55 +505,173 @@ try:
 
 			#### NOW FIT THAT SUCKER
 			popt, pcov = curve_fit(sinecurve, KOI_epochs, KOI_OCs, sigma=KOI_OCerrs, bounds=([0, -2*np.pi], [20*KOI_rms, 2*np.pi]))
-
 			
-
-			#### calculate BIC and deltaBIC
+			#### calculate BIC and deltaBIC -- USE ALL THE DATAPOINTS!
 			BIC_flat = chisquare(KOI_OCs, np.linspace(0,0,len(KOI_OCs)),KOI_OCerrs) #k = 2
 			BIC_curve = 2*np.log(len(KOI_OCs)) + chisquare(KOI_OCs, sinecurve(KOI_epochs, *popt), KOI_OCerrs)
 			### we want BIC_curve to be SMALLER THAN BIC_flat, despite the penalty, for the SINE MODEL TO HOLD WATER.
 			#### SO IF THAT'S THE CASE, AND WE DO BIC_curve - BIC_flat, then delta-BIC will be negative, which is what we want.
 			deltaBIC = BIC_curve - BIC_flat 
-			deltaBICs.append(deltaBIC)
 
 
-			if (show_plots == 'y') and ('KOI-'+kepoi in HL_KOIs):
+
+
+			#### NOW WE'LL DO EXACTLY AS ABOVE, BUT WITH THE CROSS-VALIDATION REMOVALS.
+			if cross_validate_LSPs == 'y':
+				#### lists to be used for evaluating the robustness of the periodogram results.
+				cv_best_periods = []
+				cv_deltaBICs = []
+				cv_amplitudes = []
+				cv_phases = []
+				cv_popts = []
+				cv_pcovs = []
+
+				ntoremove = int(cv_frac_to_leave_out*len(KOI_epochs))
+				if ntoremove < 1:
+					ntoremove = 1
+					cv_ntrials_this_time = len(KOI_epochs)
+				else:
+					cv_ntrials_this_time = cv_ntrials
+
+				for cv_trialnum in np.arange(0,cv_ntrials_this_time,1):
+					if ntoremove == 1:
+						idxs_to_leave_out = cv_trialnum ### make sure you leave out every point, one per trial
+					else:
+						idxs_to_leave_out = np.random.randint(low=0, high=len(KOI_epochs), size=ntoremove)	
+					cv_KOI_epochs = np.delete(KOI_epochs, idxs_to_leave_out)
+					cv_KOI_OCs = np.delete(KOI_OCs, idxs_to_leave_out)
+					cv_KOI_OCerrs = np.delete(KOI_OCerrs, idxs_to_leave_out)
+
+					cv_LSperiods = np.logspace(np.log10(2), np.log10(500), 5000)
+					cv_LSfreqs = 1/cv_LSperiods
+					cv_LSpowers = LombScargle(cv_KOI_epochs, cv_KOI_OCs, cv_KOI_OCerrs).power(cv_LSfreqs)
+					cv_peak_power_idx = np.nanargmax(cv_LSpowers)
+					cv_peak_power_period = cv_LSperiods[cv_peak_power_idx]
+					cv_peak_power_freq = 1/cv_peak_power_period
+
+					if cv_trialnum == 0:
+						cv_LSpowers_stack = cv_LSpowers
+					else:
+						cv_LSpowers_stack = np.vstack((cv_LSpowers_stack, cv_LSpowers))
+
+
+					def cv_sinecurve(tvals, amplitude, phase):
+						angfreq = 2 * np.pi * cv_peak_power_freq
+						sinewave = amplitude * np.sin(angfreq * tvals + phase)
+						return sinewave
+
+
+					#### NOW FIT THAT SUCKER
+					cv_popt, cv_pcov = curve_fit(cv_sinecurve, cv_KOI_epochs, cv_KOI_OCs, sigma=cv_KOI_OCerrs, bounds=([0, -2*np.pi], [20*KOI_rms, 2*np.pi]))
+					cv_popts.append(cv_popt)
+					cv_pcovs.append(cv_pcov)
+					cv_amplitudes.append(cv_popt[0])
+					cv_phases.append(cv_popt[1])
+					
+					#### calculate BIC and deltaBIC -- USE ALL THE DATAPOINTS!
+					cv_BIC_flat = chisquare(KOI_OCs, np.linspace(0,0,len(KOI_OCs)),KOI_OCerrs) #k = 2
+					cv_BIC_curve = 2*np.log(len(KOI_OCs)) + chisquare(KOI_OCs, sinecurve(KOI_epochs, *cv_popt), KOI_OCerrs)
+					cv_deltaBIC = cv_BIC_curve - cv_BIC_flat 
+
+					cv_best_periods.append(cv_peak_power_period)
+					cv_deltaBICs.append(cv_deltaBIC)
+
+				#### now compute the median and std for period fits, and the same for the deltaBIC
+				cv_best_periods, cv_deltaBICs = np.array(cv_best_periods), np.array(cv_deltaBICs)
+				cv_period_skew, cv_period_kurtosis = skew(cv_best_periods), kurtosis(cv_best_periods)
+				cv_amplitudes, cv_phases = np.array(cv_amplitudes), np.array(cv_phases)
+				cv_best_period_median, cv_best_period_std = np.nanmedian(cv_best_periods), np.nanstd(cv_best_periods)
+				cv_period_pct_error = cv_best_period_std / cv_best_period_median
+				cv_deltaBICs_median, cv_deltaBICs_std = np.nanmedian(cv_deltaBICs), np.nanstd(cv_deltaBICs)
+				cv_amplitude_median, cv_amplitude_std = np.nanmedian(cv_amplitudes), np.nanstd(cv_amplitudes)
+				cv_amplitude_pct_error = cv_amplitude_std / cv_amplitude_median
+				cv_phase_median, cv_phase_std = np.nanmedian(cv_phases), np.nanstd(cv_phases)
+				#phase_pct_error = np.abs(cv_phase_std / cv_phase_median)
+				cv_phase_pct_error = cv_phase_std / (2*np.pi) #### SHOULD NOT BE A FRACTION OF THE VALUE! IT SHOULD BE A FRACTION OF THE CIRCLE!!!
+
+				print('PTTV = '+str(cv_best_period_median)+' +/- '+str(cv_best_period_std))
+				print('PTTV pct error = ', str(cv_period_pct_error*100))
+				print("PTTV Skew, Kurtosis = ", str(cv_period_skew), str(cv_period_kurtosis))
+				print('ATTV = '+str(cv_amplitude_median)+' +/- '+str(cv_amplitude_std))
+				print('ATTV pct error = ', str(cv_amplitude_pct_error*100))
+				print('Phase = '+str(cv_phase_median)+' +/- '+str(cv_phase_std))
+				print('Phase pct error = ', str(cv_phase_pct_error*100))
+				print("deltaBIC = "+str(cv_deltaBICs_median)+' +/- '+str(cv_deltaBICs_std))
+				print(' ')
+
+				crossval_resultsfile = open('/data/tethys/Documents/Projects/NMoon_TTVs/'+PTTV_resultsname, mode='a')
+				#crossval_resultsfile.write('KOI,n_crossval_trials,n_epochs,n_removed,PTTV_median,PTTV_std,PTTV_skew,PTTV_kurtosis,PTTV_pcterr,ATTV_median,ATTV_std,ATTV_pcterr,phase_median,phase_std,phase_pcterr,deltaBIC,deltaBIC_std\n')
+				crossval_resultsfile.write(str(kepoi)+','+str(cv_ntrials_this_time)+','+str(len(KOI_epochs))+','+str(ntoremove)+','+str(cv_best_period_median)+','+str(cv_best_period_std)+','+str(cv_period_skew)+','+str(cv_period_kurtosis)+','+str(cv_period_pct_error*100)+','+str(cv_amplitude_median)+','+str(cv_amplitude_std)+','+str(cv_amplitude_pct_error*100)+','+str(cv_phase_median)+','+str(cv_phase_std)+','+str(cv_phase_pct_error*100)+','+str(cv_deltaBICs_median)+','+str(cv_deltaBICs_std)+'\n')
+				crossval_resultsfile.close()
+
+			if show_plots == 'y':
+				#### THIS IS THE FULL DATA FIT FROM ABOVE -- NO LEAVING OUT DATA.
 				KOI_epochs_interp = np.linspace(np.nanmin(KOI_epochs), np.nanmax(KOI_epochs), 1000)
 				KOI_TTV_interp = sinecurve(KOI_epochs_interp, *popt)
-
 				plt.scatter(KOI_epochs, KOI_OCs, facecolor='LightCoral', edgecolor='k', alpha=0.7, zorder=2)
-				plt.errorbar(KOI_epochs, KOI_OCs, yerr=KOI_OCerrs, ecolor='k', fmt='none', zorder=1)
-				plt.plot(KOI_epochs_interp, KOI_TTV_interp, color='k', linestyle='--', linewidth=2)
+				plt.errorbar(KOI_epochs, KOI_OCs, yerr=KOI_OCerrs, ecolor='k', fmt='none', zorder=1, alpha=0.2)
+				plt.plot(KOI_epochs_interp, KOI_TTV_interp, color='k', linestyle='--', linewidth=2, alpha=0.2)
+
+				if cross_validate_LSPs == 'y':
+					for cv_popt in cv_popts:
+						cv_KOI_TTV_interp = cv_sinecurve(KOI_epochs_interp, *cv_popt)				
+						plt.plot(KOI_epochs_interp, cv_KOI_TTV_interp, color='k', linestyle='--', linewidth=2, alpha=0.2)
+				
 				plt.plot(KOI_epochs, np.linspace(0,0,len(KOI_epochs)), color='k', linestyle=':', alpha=0.5, zorder=0)
 				plt.xlabel("epoch")
 				plt.ylabel('O - C [min]')
-				plt.title('KOI-'+str(kepoi)+r', rms = '+str(round(orig_KOI_rms,2))+', $\Delta \mathrm{BIC} = $'+str(round(deltaBIC, 2)))
+				plt.title('KOI-'+str(kepoi))
 				plt.show()
 
+
+
+			####### END CROSS-VALIDATION TEST #################################################
+
+
+			###### FOR PLANETS WITH DISCERNIBLE TTVs, INCLUDE THEM IN THESE LISTS.
 			if deltaBIC <= -2:
 				radii.append(kepler_radius_rearth[nkepoi])
 				radii_errors.append(kepler_radius_rearth_err[nkepoi])
+				stellar_masses.append(kepler_solar_mass[nkepoi])
+				stellar_masses_errors.append(kepler_solar_mass_err[nkepoi])
 				P_TTVs.append(peak_power_period)
 				P_plans.append(kepoi_period)
 				amplitude = np.nanmax(np.abs(BIC_curve))
 				TTV_amplitudes.append(amplitude)
 				Pip1_over_Pis.append(kepoi_multi_Pip1_over_Pis)
 				Pi_over_Pim1s.append(kepoi_multi_Pi_over_Pim1s)
-
-				if kepoi_multi[nkepoi] == True:
-					#multi_idxs.append(nkepoi)
-					multi_idxs.append(entrynum)
-				elif kepoi_multi[nkepoi] == False:
-					#single_idxs.append(nkepoi)
-					single_idxs.append(entrynum)
-
-
+				forecast_masses.append(forecast_mass)
+				forecast_masses_uperr.append(forecast_mass_uperr)
+				forecast_masses_lowerr.append(forecast_mass_lowerr)
+				deltaBICs.append(deltaBIC)
 				if 'KOI-'+kepoi in HL_KOIs:
 					in_HLcatalog_idxs.append(entrynum)
 				else:
 					notin_HLcatalog_idxs.append(entrynum)
 
-				entrynum += 1
+				if kepoi_multi[nkepoi] == True:
+					multi_idxs.append(entrynum)
+				elif kepoi_multi[nkepoi] == False:
+					single_idxs.append(entrynum)
+	
+				#### CROSS-VALIDATION LISTS
+				if cross_validate_LSPs == 'y':
+					cv_PTTV_pcterrs.append(cv_period_pct_error)
+					cv_ATTV_pcterrs.append(cv_amplitude_pct_error)
+					cv_phase_pcterrs.append(cv_phase_pct_error)
+
+				elif (cross_validate_LSPs == 'n') and (use_Holczer_or_gose == 'h') and (loaded_holczer_crossvalfile == 'y'):
+					cv_PTTV_pcterrs.append(holczer_cv_period_pct_error)
+					cv_ATTV_pcterrs.append(holczer_cv_amplitude_pct_error)
+					cv_phase_pcterrs.append(holczer_cv_phase_pct_error)
+
+				elif (cross_validate_LSPs == 'n') and (use_Holczer_or_gose == 'g') and (loaded_TKS_crossvalfile == 'y'):
+				cv_PTTV_pcterrs.append(TKS_cv_period_pct_error)
+				cv_ATTV_pcterrs.append(TKS_cv_amplitude_pct_error)
+				cv_phase_pcterrs.append(TKS_cv_phase_pct_error)			
+
+				entrynum += 1 #### advance the number of entries.
+
 
 
 
@@ -396,36 +679,95 @@ try:
 			traceback.print_exc()
 			time.sleep(5)
 
+
+
+
+
+
+
+
+	################## CONVERT LISTS TO ARRAYS ###################################
 	multi_idxs = np.array(multi_idxs)
 	single_idxs = np.array(single_idxs)
+	print('# singles , # multis = ', len(single_idxs), len(multi_idxs))
+	print('# in HL , # not in HL = ', len(in_HLcatalog_idxs), len(notin_HLcatalog_idxs))
 	in_HLcatalog_idxs = np.array(in_HLcatalog_idxs)
 	notin_HLcatalog_idxs = np.array(notin_HLcatalog_idxs)
 	notin_HLcatalog_single_idxs = np.intersect1d(single_idxs, notin_HLcatalog_idxs)
 	notin_HLcatalog_multi_idxs = np.intersect1d(multi_idxs, notin_HLcatalog_idxs)
+	single_notHL_idxs = np.intersect1d(notin_HLcatalog_idxs, single_idxs)
+	multi_notHL_idxs = np.intersect1d(notin_HLcatalog_idxs, multi_idxs)
+	multi_HL_idxs = np.intersect1d(in_HLcatalog_idxs, multi_idxs) #### should be the same as in_HLcatalog_idxs
 	TTV_amplitudes = np.array(TTV_amplitudes)
-
-	print('# singles , # multis = ', len(single_idxs), len(multi_idxs))
-	print('# in HL , # not in HL = ', len(in_HLcatalog_idxs), len(notin_HLcatalog_idxs))
-
+	forecast_masses, forecast_masses_uperr, forecast_masses_lowerr = np.array(forecast_masses), np.array(forecast_masses_uperr), np.array(forecast_masses_lowerr)
+	#### replace all forecast_masses == 0.0 with np.nan!
+	forecast_masses[np.where(forecast_masses == 0.0)[0]] = np.nan
 	P_TTVs = np.array(P_TTVs)
 	P_plans = np.array(P_plans)
+	P_plans_minutes = P_plans * 24 * 60 
 	radii = np.array(radii)
 	radii_errors = np.array(radii_errors)
+	stellar_masses = np.array(stellar_masses)
+	stellar_masses_errors = np.array(stellar_masses_errors)
+	stellar_masses_mearth = (stellar_masses * M_sun) / M_earth 
+	cv_PTTV_pcterrs = np.array(cv_PTTV_pcterrs)
+	cv_ATTV_pcterrs = np.array(cv_ATTV_pcterrs)
+	cv_phase_pcterrs = np.array(cv_phase_pcterrs)
+
+
+	#### CUT BASED ON A BETTER THAN 5% ERROR ON PERIOD, AMPLITUDE AND PHASE ACROSS ALL SOLUTIONS.
+	good_PTTV_pcterr_idxs = np.where(cv_PTTV_pcterrs <= 5)[0]
+	good_ATTV_pcterr_idxs = np.where(cv_ATTV_pcterrs <= 5)[0]
+	good_phase_pcterr_idxs = np.where(cv_phase_pcterrs <= 5)[0]
+	good_cv_pcterr_idxs = np.intersect1d(good_PTTV_pcterr_idxs, good_ATTV_pcterr_idxs)
+	good_cv_pcterr_idxs = np.intersect1d(good_cv_pcterr_idxs, good_phase_pcterr_idxs)
 
 
 
-	### generate masses
-	"""
-	Rstat2M = np.vectorize(Rstat2M)
-	print('FORECASTing masses from radii: ')
-	forecast_masses, forecast_masses_uperr, forecast_masses_lowerr = Rstat2M(mean=radii, std=radii_errors, unit='Earth')
-
+	#### COMPUTE THE MINIMUM fraction of the Hill sphere.
+	fmin = np.vectorize(fmin)
+	fmins_vals = fmin(forecast_masses, stellar_masses_mearth.value, TTV_amplitudes, P_plans_minutes)
+	fmins, fmin_vars = fmins_vals[0], fmins_vals[1:]
+	possible_moon_fmin_idxs = np.where(fmins < 1.0)[0]
+	impossible_moon_fmin_idxs = np.where(fmins >= 1.0)[0]
 	highest_mass = np.nanmax(forecast_masses)
 	normalized_masses = forecast_masses / highest_mass
-
 	amplitudes_div_masses = TTV_amplitudes / normalized_masses
-	"""
 
+
+
+
+
+
+
+
+
+	#########################################
+	## P L O T T I N G ######################
+	#########################################
+
+
+	#### PLOT fmins vs P_plans for the multis in and not in the HL2017 catalog.
+	plt.scatter(P_plans[notin_HLcatalog_single_idxs], fmins[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
+	plt.scatter(P_plans[notin_HLcatalog_multi_idxs], fmins[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
+	plt.scatter(P_plans[in_HLcatalog_idxs], fmins[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
+	plt.plot(np.linspace(np.nanmin(P_plans), np.nanmax(P_plans), 100), np.linspace(0.4895, 0.4895, 100), c='k', linestyle='--', linewidth=2)
+	plt.fill_between(np.linspace(np.nanmin(P_plans), np.nanmax(P_plans), 100), 1e-5, 0.4895, color='green', alpha=0.1)
+	plt.fill_between(np.linspace(np.nanmin(P_plans), np.nanmax(P_plans), 100), 0.4895, 1e5, color='red', alpha=0.1)
+	plt.ylim(np.nanmin(fmins), np.nanmax(fmins))
+
+	plt.xlim(np.nanmin(P_plans), np.nanmax(P_plans))
+	plt.xlabel(r'$P_{\mathrm{P}}$ [days]')
+	plt.ylabel(r'minimum fraction $R_{\mathrm{Hill}}$')
+	plt.xscale('log')
+	plt.yscale('log')
+	plt.legend()
+	plt.show()
+
+
+
+	####### PLOT ATTV vs Pplan for single and multis (not in Hadden & Lithwick)
+	"""
 	plt.scatter(P_plans[notin_HLcatalog_single_idxs], TTV_amplitudes[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
 	plt.scatter(P_plans[notin_HLcatalog_multi_idxs], TTV_amplitudes[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
 	plt.scatter(P_plans[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
@@ -434,8 +776,11 @@ try:
 	plt.yscale('log')
 	plt.legend()
 	plt.show()
+	"""
 
 
+	######### PLOT ATTV vs PTTV for singles and multis (not in Hadden & Lithwick)
+	"""
 	plt.scatter(P_TTVs[notin_HLcatalog_single_idxs], TTV_amplitudes[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
 	plt.scatter(P_TTVs[notin_HLcatalog_multi_idxs], TTV_amplitudes[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
 	plt.scatter(P_TTVs[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
@@ -445,8 +790,11 @@ try:
 	plt.xscale('log')
 	plt.legend()
 	plt.show()
+	"""
 
 
+	########### PLOT PTTV vs Pplan for singles and multis (not in HL2017)
+	"""
 	plt.scatter(P_plans[notin_HLcatalog_single_idxs], P_TTVs[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
 	plt.scatter(P_plans[notin_HLcatalog_multi_idxs], P_TTVs[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
 	plt.scatter(P_plans[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
@@ -456,70 +804,11 @@ try:
 	plt.xscale('log')
 	plt.legend()
 	plt.show()
-
-
-	"""
-	#### replace all forecast_masses == 0.0 with np.nan!
-	forecast_masses[np.where(forecast_masses == 0.0)[0]] = np.nan
-
-	#### look at the mass distributions 
-	plt.scatter(P_plans[notin_HLcatalog_single_idxs], forecast_masses[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
-	plt.scatter(P_plans[notin_HLcatalog_multi_idxs], forecast_masses[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
-	plt.scatter(P_plans[in_HLcatalog_idxs], forecast_masses[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
-	
-
-
-	plt.xlabel(r'$P_{\mathrm{P}}$ [days]')
-	plt.ylabel(r'FORECASTER $M_{\oplus}$')
-	plt.yscale('log')
-	plt.xscale('log')
-	plt.legend()
-	plt.show()
 	"""
 
 
 
-
-
-
-	#raise Exception('this is all you want to do right now.')
-
-
-
-	kdestack = np.vstack((P_plans, P_TTVs))
-
-	gkde = gaussian_kde(kdestack)
-	gkde_points_p, gkde_points_t = [], []
-	for p in np.logspace(np.log10(np.nanmin(P_plans)), np.log10(np.nanmax(P_plans)), 100):
-		for t in np.logspace(np.log10(np.nanmin(P_TTVs)), np.log10(np.nanmax(P_TTVs)), 100):
-			gkde_points_p.append(p)
-			gkde_points_t.append(t)
-
-	gkde_points_p = np.array(gkde_points_p)
-	gkde_points_t = np.array(gkde_points_t)
-
-	gkde_points = np.vstack((gkde_points_p, gkde_points_t))
-
-	gkde_values = gkde.evaluate(gkde_points)
-	gkde_norm_values = (gkde_values - np.nanmin(gkde_values)) / (np.nanmax(gkde_values) - np.nanmin(gkde_values))
-
-
-	colors = cm.coolwarm(gkde_norm_values)
-
-
-	plt.scatter(gkde_points_p, gkde_points_t, facecolor=colors, s=100)
-	#plt.show()
-	#plt.scatter(P_plans, P_TTVs, facecolor='DodgerBlue', alpha=0.5, edgecolor='k', s=20)
-	plt.scatter(P_plans, P_TTVs, facecolor='k', alpha=0.5, edgecolor='k', s=5)
-	plt.xlabel('planet period')
-	plt.ylabel('TTV period [epochs]')
-	plt.xscale('log')
-	plt.yscale('log')
-	plt.show()
-
-
-
-	#### SOMETHING IS WEIRD ABOUT THE GKDE -- try a heatmap (hist2d)
+	#### PTTV vs PPLAN BINS FOR HEATMAPS BELOW
 	xbins = np.logspace(np.log10(10), np.log10(1500), 20) #### consistent with the simulation
 	ybins = np.logspace(np.log10(2), np.log10(100), 20) #### consistent with the simulation
 	xcenters, ycenters = [], []
@@ -538,6 +827,8 @@ try:
 
 
 
+	##### PTTV vs Pplan HEATMAP OF *EVERYTHING* -- SINGLES AND MULTIS###############
+	"""
 	TTV_Pplan_hist2d = np.histogram2d(P_plans, P_TTVs, bins=[xbins, ybins])
 	plt.imshow(TTV_Pplan_hist2d[0].T, origin='lower', cmap=cm.coolwarm)
 	plt.xticks(ticks=np.arange(0,len(xbins),5), labels=np.around(np.log10(xbins[::5]),2))
@@ -550,8 +841,7 @@ try:
 	np.save('/data/tethys/Documents/Projects/NMoon_TTVs/mazeh_PTTV10-1500_Pplan2-100_20x20_heatmap.npy', TTV_Pplan_hist2d)
 
 
-	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
-	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
+	######## SAME AS ABOVE, USING MATPLOTLIB HIST2D RATHER THAN NUMPY HIST2D.
 	plt.figure(figsize=(6,6))
 	heatmap = plt.hist2d(P_plans, P_TTVs, bins=[xbins, ybins], cmap='coolwarm')[0]
 	plt.scatter(P_plans, P_TTVs, facecolor='w', edgecolor='k', s=5, alpha=0.3)
@@ -561,21 +851,11 @@ try:
 	plt.ylabel(r'$P_{\mathrm{TTV}}$ [epochs]')
 	#plt.title('Matplotlib 2D histogram')
 	plt.show()
+	"""
 
 
-
-
-
-
-
-
-
-
-
-
-	##### LOOK AT THE HEATMAP FOR SINGLES AND MULTIS
-	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
-	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
+	#### PTTV vs PPLAN FOR SINGLES AND MULTIS
+	"""
 	fig, (ax1, ax2) = plt.subplots(2, figsize=(6,12))
 	heatmap_single = ax1.hist2d(P_plans[single_idxs], P_TTVs[single_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
 	ax1.scatter(P_plans[single_idxs], P_TTVs[single_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
@@ -583,26 +863,22 @@ try:
 	ax1.set_yscale('log')
 	ax1.set_ylabel(r'$P_{\mathrm{TTV}}$ [epochs] (single)')
 
-	np.save('/data/tethys/Documents/Projects/NMoon_TTVs/heatmap_single.npy', heatmap_single)	
-
 	heatmap_multi = ax2.hist2d(P_plans[multi_idxs], P_TTVs[multi_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
 	ax2.scatter(P_plans[multi_idxs], P_TTVs[multi_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
 	ax2.set_xscale('log')
 	ax2.set_yscale('log')
 	ax2.set_ylabel(r'$P_{\mathrm{TTV}}$ [epochs] (multi)')
-
 	ax2.set_xlabel(r'$P_{\mathrm{P}}$ [days]')
 
-
-	#plt.title('Matplotlib 2D histogram')
+	np.save('/data/tethys/Documents/Projects/NMoon_TTVs/heatmap_single.npy', heatmap_single)	
 	plt.show()	
+	"""
 
 
 
-
+	"""
 	##### LOOK AT THE DISTRIBUTION FOR HL2017 SOURCES and Non-HL2017 sources
-	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
-	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
+	#### PTTV vs Pplan HEATMAP FOR THOSE IN AND OUTSIDE HL2017
 	fig, (ax1, ax2) = plt.subplots(2, figsize=(6,12))
 	heatmap_single = ax1.hist2d(P_plans[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
 	ax1.scatter(P_plans[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
@@ -617,16 +893,13 @@ try:
 	ax2.set_ylabel(r'$P_{\mathrm{TTV}}$ [epochs] (non-HL2017)')
 
 	ax2.set_xlabel(r'$P_{\mathrm{P}}$ [days]')
-
-
-	#plt.title('Matplotlib 2D histogram')
 	plt.show()	
+	"""
 
 
 
 	##### LOOK AT AMPLITUDE VS PTTV FOR HL2017 SOURCES and Non-HL2017 sources
-	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
-	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
+	"""
 	fig, (ax1, ax2) = plt.subplots(2, figsize=(6,12))
 	heatmap_single = ax1.hist2d(P_TTVs[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
 	ax1.scatter(P_TTVs[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
@@ -645,13 +918,12 @@ try:
 
 	#plt.title('Matplotlib 2D histogram')
 	plt.show()	
+	"""
 
 
 
-
+	"""
 	##### LOOK AT AMPLITUDE VS PTTV FOR SINGLES AND MULTIs
-	#### COMPARE TO NATIVE MATPLOTLIB HISTOGRAM
-	#### THIS IS MUCH BETTER -- you get the tick labels for free... could even do a scatter over top
 	fig, (ax1, ax2) = plt.subplots(2, figsize=(6,12))
 	heatmap_single = ax1.hist2d(P_TTVs[single_idxs], TTV_amplitudes[single_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
 	ax1.scatter(P_TTVs[single_idxs], TTV_amplitudes[single_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
@@ -670,11 +942,12 @@ try:
 
 	#plt.title('Matplotlib 2D histogram')
 	plt.show()	
+	"""
 
 
 
 
-
+	"""
 	#### make straight-up histograms for HL2017 and non-HL20217
 	fig, (ax1, ax2) = plt.subplots(2, sharex=True)
 	ax1.hist(P_TTVs[in_HLcatalog_idxs], bins=ybins, facecolor='DodgerBlue', edgecolor='k', alpha=0.7)
@@ -685,7 +958,6 @@ try:
 	ax2.set_xlabel(r'$P_{\mathrm{TTV}}$ [epochs]')
 	ax2.set_xscale('log')
 	plt.show()
-
 
 
 	#### make straight-up histograms for HL2017 and non-HL20217 -- AMPLITUDES
@@ -738,11 +1010,12 @@ try:
 	ax2.set_xlabel(r'$\Delta$BIC')
 	#ax2.set_xscale('log')
 	plt.show()
+	"""
 
 
 
 	##### PLOT amplitude and PTTV as a function of the MULTI periods
-
+	"""
 	fig, (ax1, ax2) = plt.subplots(2, sharex=True, sharey=True)
 	ax1.scatter(kepoi_multi_Pip1_over_Pis[multi_idxs], TTV_amplitudes[multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.7)
 	ax1.set_ylabel('TTV amplitude [minutes]')
@@ -757,16 +1030,23 @@ try:
 	ax2.set_yscale('log')
 	#ax2.set_ylim(0,1000)
 	plt.show()
+	"""
 
 
 
 	##### CREATE ONE GIANT PANEL -- (4x4) with 1) sims, 2) non-HL singles, 3) non-HL multis, 4) HL, and 
 	##### Pplan, PTTV, Amplitudes, DeltaBICs
 
+	#### NEW -- make it 6 x 4, to include histograms of 4
+
 	#np.save(projectdir+'/sim_deltaBIC_list.npy', deltaBIC_list[good_BIC_stable_idxs])
 	#np.save(projectdir+'/sim_PTTVs.npy', P_TTVs)
 	#np.save(projectdir+'/sim_Pplans.npy', P_plans)
 
+
+
+
+	##### LOAD SIMULATION VALUES.
 	try:
 		sim_deltaBIC_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_deltaBIC_list.npy')
 		sim_PTTVs = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_PTTVs.npy')
@@ -779,37 +1059,32 @@ try:
 		sim_Pplans = np.load(projectdir+'/sim_Pplans.npy')
 		sim_TTV_amplitudes = np.load(projectdir+'/sim_TTV_amplitudes.npy')
 
-
-		#try:
-		#	sim_TTV_ampltiudes = np.load(projectdir+'/sim_TTV_amplitudes.npy')
-		#except:
-		#	sim_TTV_amplitudes = np.random.randint(low=0, high=1e3, size=len(sim_deltaBIC_list))+np.random.random(size=len(sim_deltaBIC_list))
-
-
 	sim_TTV_amplitudes_minutes = sim_TTV_amplitudes / 60
 
-	single_notHL_idxs = np.intersect1d(notin_HLcatalog_idxs, single_idxs)
-	multi_notHL_idxs = np.intersect1d(notin_HLcatalog_idxs, multi_idxs)
-	multi_HL_idxs = np.intersect1d(in_HLcatalog_idxs, multi_idxs) #### should be the same as in_HLcatalog_idxs
+	#sim_PTTVs = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_PTTVs.npy')
+	#sim_Pplans = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_Pplans.npy')
 
-	deltaBIC_lists = [sim_deltaBIC_list, deltaBICs[single_notHL_idxs], deltaBICs[multi_notHL_idxs], deltaBICs[multi_HL_idxs]]
+
+
+	#### PREPARE DATA FOR 6 x 4 PLOT.
+	deltaBIC_lists = [sim_deltaBIC_list, deltaBICs[single_notHL_idxs], deltaBICs[multi_notHL_idxs], deltaBICs[multi_HL_idxs], deltaBICs[possible_moon_fmin_idxs], deltaBICs[impossible_moon_fmin_idxs]]
 	deltaBIC_bins = np.linspace(-100,-2,20)
 	
-	PTTV_lists = [sim_PTTVs, P_TTVs[single_notHL_idxs], P_TTVs[multi_notHL_idxs], P_TTVs[multi_HL_idxs]]
+	PTTV_lists = [sim_PTTVs, P_TTVs[single_notHL_idxs], P_TTVs[multi_notHL_idxs], P_TTVs[multi_HL_idxs], P_TTVs[possible_moon_fmin_idxs], P_TTVs[impossible_moon_fmin_idxs]]
 	PTTV_bins = np.logspace(np.log10(2), np.log10(100), 20)
 	
-	TTVamp_lists = [sim_TTV_amplitudes_minutes, TTV_amplitudes[single_notHL_idxs], TTV_amplitudes[multi_notHL_idxs], TTV_amplitudes[multi_HL_idxs]]
+	TTVamp_lists = [sim_TTV_amplitudes_minutes, TTV_amplitudes[single_notHL_idxs], TTV_amplitudes[multi_notHL_idxs], TTV_amplitudes[multi_HL_idxs], TTV_amplitudes[possible_moon_fmin_idxs], TTV_amplitudes[impossible_moon_fmin_idxs]]
 	TTVamp_bins = np.logspace(0,6,20)
 
 	#PTTV_over_Pplan_lists = [sim_PTTVs / sim_Pplans, P_TTVs[single_notHL_idxs]/P_plans[single_notHL_idxs], P_TTVs[multi_notHL_idxs]/P_plans[multi_notHL_idxs], P_TTVs[multi_HL_idxs] / P_plans[multi_HL_idxs]]
 	#PTTV_over_Pplan_bins = np.logspace(0,3,20)
 
-	Pplan_lists = [sim_Pplans, P_plans[single_notHL_idxs], P_plans[multi_notHL_idxs], P_plans[multi_HL_idxs]]
+	Pplan_lists = [sim_Pplans, P_plans[single_notHL_idxs], P_plans[multi_notHL_idxs], P_plans[multi_HL_idxs], P_plans[possible_moon_fmin_idxs], P_plans[impossible_moon_fmin_idxs]]
 	Pplan_bins = np.logspace(np.log10(1), np.log10(1500), 20)
 	#amp_over_mass_lists = [sim_AoverM, amplitudes_div_masses[single_notHL_idxs], amplitudes_div_masses[multi_notHL_idxs], amplitudes_div_masses[multi_HL_idxs]]
 
 
-	row_labels = ['moon sims', 'singles', 'multis', 'HL2017']
+	row_labels = ['moon sims', 'singles', 'multis', 'HL2017', 'possible', 'impossible']
 	col_labels = [r'$P_{\mathrm{P}}$ [days]', r'$P_{\mathrm{TTV}}$ [epochs]', 'TTV amplitude [min]', r'$\Delta$BIC']
 	column_list_of_lists = [Pplan_lists, PTTV_lists, TTVamp_lists, deltaBIC_lists]
 	bin_lists = [Pplan_bins, PTTV_bins, TTVamp_bins, deltaBIC_bins]
@@ -817,7 +1092,7 @@ try:
 
 	colors = cm.viridis(np.linspace(0,1,len(bin_lists)))	
 
-	nrows = 4 #### sim, single, multi, HL
+	nrows = 6 #### sim, single, multi, HL
 	ncols = 4 #### Pplan, PTTV, deltaBIC
 
 	fig, ax = plt.subplots(nrows,ncols) ### might need to reverse this
@@ -845,14 +1120,8 @@ try:
 			if row != nrows-1:
 				ax[row][col].set_xticklabels([])
 
-			#if col != 0:
-			#	ax[row][col].set_yticklabels([])
-
-			#ax[row][col].set_yticklabels([])
-
 	plt.tight_layout()
 	plt.show()
-
 
 
 
@@ -860,27 +1129,27 @@ try:
 	#### DO IT FOR HL against ALL, and HL against MULTIS.
 	#### values we will test are P_TTVs, deltaBICs, P_plans, 
 
+	try:
+		ks_PTTV_allvsHL = kstest(P_TTVs[notin_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs])
+		ks_PTTV_multivsHL = kstest(P_TTVs[notin_HLcatalog_multi_idxs], P_TTVs[in_HLcatalog_idxs])
+		ks_Pplan_allvsHL = kstest(P_plans[notin_HLcatalog_idxs], P_plans[in_HLcatalog_idxs])
+		ks_Pplan_multivsHL = kstest(P_plans[notin_HLcatalog_multi_idxs], P_plans[in_HLcatalog_idxs])
+		ks_TTVamp_allvsHL = kstest(TTV_amplitudes[notin_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs])
+		ks_TTVamp_multivsHL = kstest(TTV_amplitudes[notin_HLcatalog_multi_idxs], TTV_amplitudes[in_HLcatalog_idxs])
+		#ks_forecast_masses_allvsHL = kstest(forecast_masses[notin_HLcatalog_idxs], forecast_masses[in_HLcatalog_idxs])
+		#ks_forecast_masses_multivsHL = kstest(forecast_masses[notin_HLcatalog_multi_idxs], forecast_masses[in_HLcatalog_idxs])
+		ks_radii_allvsHL = kstest(radii[notin_HLcatalog_idxs], radii[in_HLcatalog_idxs])
+		ks_radii_multivsHL = kstest(radii[notin_HLcatalog_multi_idxs], radii[in_HLcatalog_idxs])	
 
-	ks_PTTV_allvsHL = kstest(P_TTVs[notin_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs])
-	ks_PTTV_multivsHL = kstest(P_TTVs[notin_HLcatalog_multi_idxs], P_TTVs[in_HLcatalog_idxs])
-	ks_Pplan_allvsHL = kstest(P_plans[notin_HLcatalog_idxs], P_plans[in_HLcatalog_idxs])
-	ks_Pplan_multivsHL = kstest(P_plans[notin_HLcatalog_multi_idxs], P_plans[in_HLcatalog_idxs])
-	ks_TTVamp_allvsHL = kstest(TTV_amplitudes[notin_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs])
-	ks_TTVamp_multivsHL = kstest(TTV_amplitudes[notin_HLcatalog_multi_idxs], TTV_amplitudes[in_HLcatalog_idxs])
-	#ks_forecast_masses_allvsHL = kstest(forecast_masses[notin_HLcatalog_idxs], forecast_masses[in_HLcatalog_idxs])
-	#ks_forecast_masses_multivsHL = kstest(forecast_masses[notin_HLcatalog_multi_idxs], forecast_masses[in_HLcatalog_idxs])
-	ks_radii_allvsHL = kstest(radii[notin_HLcatalog_idxs], radii[in_HLcatalog_idxs])
-	ks_radii_multivsHL = kstest(radii[notin_HLcatalog_multi_idxs], radii[in_HLcatalog_idxs])	
-
-	ks_Pip1_multivsHL = kstest(Pip1_over_Pis[notin_HLcatalog_idxs], Pip1_over_Pis[in_HLcatalog_idxs])
-	ks_Pi_over_Pim1s = kstest(Pi_over_Pim1s[notin_HLcatalog_idxs], Pi_over_Pim1s[in_HLcatalog_idxs])
+		ks_Pip1_multivsHL = kstest(Pip1_over_Pis[notin_HLcatalog_idxs], Pip1_over_Pis[in_HLcatalog_idxs])
+		ks_Pi_over_Pim1s = kstest(Pi_over_Pim1s[notin_HLcatalog_idxs], Pi_over_Pim1s[in_HLcatalog_idxs])
+	except:
+		traceback.print_exc()
 
 
 
 
 
-	sim_PTTVs = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_PTTVs.npy')
-	sim_Pplans = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_Pplans.npy')
 
 
 
@@ -888,67 +1157,71 @@ try:
 
 
 	#### 4 panel heatmaps
-
-	fig, ((ax1,ax2), (ax3, ax4)) = plt.subplots(nrows=2,ncols=2)
+	fig, ((ax1,ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(nrows=3,ncols=2)
 	sim_heatmap = ax1.hist2d(sim_Pplans, sim_PTTVs, bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
-	ax1.scatter(sim_Pplans, sim_PTTVs, facecolor='w', edgecolor='k', alpha=0.2, s=10)
+	#ax1.scatter(sim_Pplans, sim_PTTVs, facecolor='w', edgecolor='k', alpha=0.2, s=10)
 	ax1.set_xscale('log')	
 	ax1.set_yscale('log')
+	ax1.set_title('sims')
 	
 	single_heatmap = ax2.hist2d(P_plans[single_idxs], P_TTVs[single_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
-	ax2.scatter(P_plans[single_idxs], P_TTVs[single_idxs], facecolor='w', edgecolor='k', alpha=0.2, s=10)
+	#ax2.scatter(P_plans[single_idxs], P_TTVs[single_idxs], facecolor='w', edgecolor='k', alpha=0.2, s=10)
 	ax2.set_xscale('log')
 	ax2.set_yscale('log')
+	ax2.set_title('singles')
 
 	multi_nonHL_heatmap = ax3.hist2d(P_plans[notin_HLcatalog_multi_idxs], P_TTVs[notin_HLcatalog_multi_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
-	ax3.scatter(P_plans[notin_HLcatalog_multi_idxs], P_TTVs[notin_HLcatalog_multi_idxs], facecolor='w', edgecolor='k', alpha=0.2, s=10)
+	#ax3.scatter(P_plans[notin_HLcatalog_multi_idxs], P_TTVs[notin_HLcatalog_multi_idxs], facecolor='w', edgecolor='k', alpha=0.2, s=10)
 	ax3.set_xscale('log')
 	ax3.set_yscale('log')
+	ax3.set_title('multi non-HL2017')
 
 	multi_HL_heatmap = ax4.hist2d(P_plans[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
-	ax4.scatter(P_plans[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], facecolor='w', edgecolor='k', alpha=0.2, s=10)
+	#ax4.scatter(P_plans[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], facecolor='w', edgecolor='k', alpha=0.2, s=10)
 	ax4.set_xscale('log')
 	ax4.set_yscale('log')
+	ax4.set_title('multi HL2017')
+
+	possible_moon_heatmap = ax5.hist2d(P_plans[possible_moon_fmin_idxs], P_TTVs[possible_moon_fmin_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
+	#ax5.scatter(P_plans[in_HLcatalog_idxs], P_TTVs[possible_moon_fmin_idxs], facecolor='w', edgecolor='k', alpha=0.2, s=10)
+	ax5.set_xscale('log')
+	ax5.set_yscale('log')
+	ax5.set_title('possible moon')
+
+	impossible_moon_heatmap = ax6.hist2d(P_plans[impossible_moon_fmin_idxs], P_TTVs[impossible_moon_fmin_idxs], bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
+	#ax4.scatter(P_plans[in_HLcatalog_idxs], P_TTVs[impossible_moon_fmin_idxs], facecolor='w', edgecolor='k', alpha=0.2, s=10)
+	ax6.set_xscale('log')
+	ax6.set_yscale('log')
+	ax6.set_title('impossible moon')
 	plt.show()
 
 
 
-	#### 
+
+
+
+	####### HEATMAPS NORMALIZED BY NUMBER OF SYSTEMS IN THE PERIOD BIN!
 	sim_heatmap_frac_of_Pplan = np.zeros(shape=sim_heatmap.shape)
 	single_heatmap_frac_of_Pplan = np.zeros(shape=single_heatmap.shape)
 	multi_nonHL_heatmap_frac_of_Pplan = np.zeros(shape=multi_nonHL_heatmap.shape)
 	multi_HL_heatmap_frac_of_Pplan = np.zeros(shape=multi_HL_heatmap.shape)
+	possible_moon_heatmap_frac_of_Pplan = np.zeros(shape=possible_moon_heatmap.shape)
+	impossible_moon_heatmap_frac_of_Pplan = np.zeros(shape=impossible_moon_heatmap.shape)
 
-	#### these will all be the same shape, so
+
 	nrows, ncols = sim_heatmap.shape
 
 	for col in np.arange(0,ncols,1):
-		#### divide each cell in the column by the sum of that column
-		#sim_heatmap_frac_of_Pplan[col] = sim_heatmap[col] / np.nansum(sim_heatmap[col])
-		##### NORMALIZE!!!!!
 		sim_heatmap_frac_of_Pplan[col] = (sim_heatmap[col] - np.nanmin(sim_heatmap[col])) / (np.nanmax(sim_heatmap[col]) - np.nanmin(sim_heatmap[col]))
-		#num_nonzero_cells = len(np.where(sim_heatmap[col] > 0)[0])
-		#sim_heatmap_frac_of_Pplan[col] = sim_heatmap_frac_of_Pplan[col] * num_nonzero_cells
-
-		#single_heatmap_frac_of_Pplan[col] = single_heatmap[col] / np.nansum(single_heatmap[col]) 
 		single_heatmap_frac_of_Pplan[col] = (single_heatmap[col] - np.nanmin(single_heatmap[col])) / (np.nanmax(single_heatmap[col]) - np.nanmin(single_heatmap[col]))
-		#num_nonzero_cells = len(np.where(single_heatmap[col] > 0)[0])
-		#single_heatmap_frac_of_Pplan[col] = single_heatmap_frac_of_Pplan[col] * num_nonzero_cells
-
-		#multi_nonHL_heatmap_frac_of_Pplan[col] = multi_nonHL_heatmap[col] / np.nansum(multi_nonHL_heatmap[col])
 		multi_nonHL_heatmap_frac_of_Pplan[col] = (multi_nonHL_heatmap[col] - np.nanmin(multi_nonHL_heatmap[col])) / (np.nanmax(multi_nonHL_heatmap[col]) - np.nanmin(multi_nonHL_heatmap[col]))
-		#num_nonzero_cells = len(np.where(multi_nonHL_heatmap[col] > 0)[0])
-		#multi_nonHL_heatmap_frac_of_Pplan[col] = multi_nonHL_heatmap_frac_of_Pplan[col] * num_nonzero_cells
-
-
-		#multi_HL_heatmap_frac_of_Pplan[col] = multi_HL_heatmap[col] / np.nansum(multi_HL_heatmap[col])
 		multi_HL_heatmap_frac_of_Pplan[col] = (multi_HL_heatmap[col] - np.nanmin(multi_HL_heatmap[col])) / (np.nanmax(multi_HL_heatmap[col]) - np.nanmin(multi_HL_heatmap[col]))
-		#num_nonzero_cells = len(np.where(multi_HL_heatmap[col] > 0)[0])
-		#multi_HL_heatmap_frac_of_Pplan[col] = multi_HL_heatmap_frac_of_Pplan[col] * num_nonzero_cells
+		possible_moon_heatmap_frac_of_Pplan[col] = (possible_moon_heatmap[col] - np.nanmin(possible_moon_heatmap[col])) / (np.nanmax(possible_moon_heatmap[col]) - np.nanmin(possible_moon_heatmap[col]))
+		impossible_moon_heatmap_frac_of_Pplan[col] = (impossible_moon_heatmap[col] - np.nanmin(impossible_moon_heatmap[col])) / (np.nanmax(impossible_moon_heatmap[col]) - np.nanmin(impossible_moon_heatmap[col]))
 
 
 	
-	fig, ((ax1,ax2), (ax3, ax4)) = plt.subplots(nrows=2,ncols=2, sharex=True, sharey=True)
+	fig, ((ax1,ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(nrows=3,ncols=2, sharex=True, sharey=True)
 	#### upper left
 	ax1.imshow(np.nan_to_num(sim_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
 	ax1.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
@@ -958,40 +1231,39 @@ try:
 	#### upper right
 	ax2.imshow(np.nan_to_num(single_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
 
-	#### lower left
+	#### middle left
 	ax3.imshow(np.nan_to_num(multi_nonHL_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
 	ax3.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
-	ax3.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	#ax3.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	ax3.set_xticks(np.arange(0,19,1)[::4])
 	ax3.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
 	ax3.set_yticks(np.arange(0,19,1)[::4])
 	ax3.set_yticklabels(np.around(np.log10(ycenters[::4]),2))
 
-
-	#### lower right
+	#### middle right
 	ax4.imshow(np.nan_to_num(multi_HL_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
-	ax4.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	#ax4.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	ax4.set_xticks(np.arange(0,19,1)[::4])
 	ax4.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+
+	#### lower left
+	ax5.imshow(np.nan_to_num(possible_moon_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+	ax5.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
+	ax5.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	ax5.set_xticks(np.arange(0,19,1)[::4])
+	ax5.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+	ax5.set_yticks(np.arange(0,19,1)[::4])
+	ax5.set_yticklabels(np.around(np.log10(ycenters[::4]),2))
+
+	#### lower right
+	ax6.imshow(np.nan_to_num(impossible_moon_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+	ax6.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	ax6.set_xticks(np.arange(0,19,1)[::4])
+	ax6.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
 	plt.show()
 
 
 
-
-
-
-	ax2.imshow(single_heatmap_frac_of_Pplan, origin='lower')
-
-
-	ax3.imshow(multi_nonHL_heatmap_frac_of_Pplan, origin='lower')
-	ax3.set_ylabel(r'$P_{\mathrm{TTV}}$ [epochs]')
-	ax3.set_xlabel(r'$P_{\mathrm{P}}$ [days]')
-
-
-
-	ax4.imshow(multi_HL_heatmap_frac_of_Pplan, origin='lower')
-	ax4.set_xlabel(r'$P_{\mathrm{P}}$ [days]')
-	plt.show()
 
 
 
