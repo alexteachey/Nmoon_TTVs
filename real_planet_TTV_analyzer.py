@@ -37,6 +37,8 @@ from scipy.stats import skew, kurtosis
 
 """
 
+plt.rcParams["font.family"] = 'serif'
+
 
 ####### FILE DIRECTORY INFORMATION
 if socket.gethostname() == 'tethys.asiaa.sinica.edu.tw':
@@ -311,7 +313,7 @@ try:
 	try:
 		#### LOAD THE CROSS-VALIDATION RESULTS (SIMULATIONS) #############################
 		sim_crossvalfile = pandas.read_csv('/data/tethys/Documents/Projects/NMoon_TTVs/sim_PTTV_results.csv')
-		sim_cv_KOI = np.array(sim_crossvalfile['KOI']).astype(str) #### of the form 1.01
+		sim_cv_KOI = np.array(sim_crossvalfile['sim']).astype(str) #### of the form 1.01
 		sim_cv_PTTV_pcterr = np.array(sim_crossvalfile['PTTV_pcterr']).astype(float)
 		sim_cv_ATTV_pcterr = np.array(sim_crossvalfile['ATTV_pcterr']).astype(float)
 		sim_cv_phase_pcterr = np.array(sim_crossvalfile['phase_pcterr']).astype(float)
@@ -434,6 +436,7 @@ try:
 
 		if (cross_validate_LSPs == 'y') and (str(kepoi) in cv_kepois_examined):
 			print('ALREADY EXAMINED. SKIPPING.')
+			print(' ')
 			continue
 
 		if nkepoi in FP_idxs:
@@ -444,14 +447,13 @@ try:
 
 		##### FIND THE CROSS-VALIDATION INDICES FOR THIS TARGET
 		if loaded_holczer_crossvalfile == 'y':
-			holczer_cv_holczer_match_idx = np.where(kepoi == Holczer_cv_KOI)[0]
+			cv_holczer_match_idx = np.where(kepoi == Holczer_cv_KOI)[0]
 			holczer_cv_period_pct_error = Holczer_cv_PTTV_pcterr[cv_holczer_match_idx]
 			holczer_cv_amplitude_pct_error = Holczer_cv_ATTV_pcterr[cv_holczer_match_idx]
 			holczer_cv_phase_pct_error = Holczer_cv_phase_pcterr[cv_holczer_match_idx]
 
 		if loaded_TKS_crossvalfile == 'y':
 			cv_TKS_match_idx = np.where(kepoi == TKS_cv_KOI)[0]
-			TKS_cv_holczer_match_idx = np.where(kepoi == TKS_cv_KOI)[0]
 			TKS_cv_period_pct_error = TKS_cv_PTTV_pcterr[cv_TKS_match_idx]
 			TKS_cv_amplitude_pct_error = TKS_cv_ATTV_pcterr[cv_TKS_match_idx]
 			TKS_cv_phase_pct_error = TKS_cv_phase_pcterr[cv_TKS_match_idx]
@@ -472,6 +474,7 @@ try:
 			KOI_idxs = np.where(KOIs == kepoi)[0]
 
 			if len(KOI_idxs) == 0:
+				print(' ')
 				#### it's not in the catalog! Continue!
 				continue
 
@@ -492,7 +495,7 @@ try:
 			##### PERFORM A LOMB-SCARGLE PERIODOGRAM ON THE ENTIRE SAMPLE OF TRANSIT TIMES ########################
 			LSperiods = np.logspace(np.log10(2), np.log10(500), 5000)
 			LSfreqs = 1/LSperiods
-			LSpowers = LombScargle(cv_KOI_epochs, cv_KOI_OCs, cv_KOI_OCerrs).power(LSfreqs)
+			LSpowers = LombScargle(KOI_epochs, KOI_OCs, KOI_OCerrs).power(LSfreqs)
 			peak_power_idx = np.nanargmax(LSpowers)
 			peak_power_period = LSperiods[peak_power_idx]
 			peak_power_freq = 1/peak_power_period
@@ -628,8 +631,33 @@ try:
 			####### END CROSS-VALIDATION TEST #################################################
 
 
-			###### FOR PLANETS WITH DISCERNIBLE TTVs, INCLUDE THEM IN THESE LISTS.
+			###### FOR PLANETS WITH DISCERNIBLE TTVs, INCLUDE THEM IN THESE LISTS. --
+			######## SCREEN BY WHETHER OR NOT THEY MEET YOUR CROSS-VALIDATION STANDARD, AS WELL.
+			if cross_validate_LSPs == 'y':
+				if (cv_period_pct_error <= 5) and (cv_amplitude_pct_error <= 5) and (cv_phase_pct_error <=5):
+					good_cv = 'y'
+				else:
+					good_cv = 'n'
+			elif cross_validate_LSPs == 'n':
+				if use_Holczer_or_gose == 'h':
+					if (holczer_cv_period_pct_error <= 5) and (holczer_cv_amplitude_pct_error <= 5) and (holczer_cv_phase_pct_error <= 5):
+						good_cv = 'y'
+					else:
+						good_cv = 'n'
+
+				elif use_Holczer_or_gose == 'g':
+					if (TKS_cv_period_pct_error <= 5) and (TKS_cv_amplitude_pct_error <= 5) and (TKS_cv_phase_pct_error <= 5):
+						good_cv = 'y'
+					else:
+						good_cv = 'n'		
+
+
 			if deltaBIC <= -2:
+				print('GOOD delta-BIC.')
+			if good_cv == 'y':
+				print('Good cross-validation.')
+			if (deltaBIC <= -2) and (good_cv == 'y'):
+				print('including this system.')
 				radii.append(kepler_radius_rearth[nkepoi])
 				radii_errors.append(kepler_radius_rearth_err[nkepoi])
 				stellar_masses.append(kepler_solar_mass[nkepoi])
@@ -666,13 +694,15 @@ try:
 					cv_phase_pcterrs.append(holczer_cv_phase_pct_error)
 
 				elif (cross_validate_LSPs == 'n') and (use_Holczer_or_gose == 'g') and (loaded_TKS_crossvalfile == 'y'):
-				cv_PTTV_pcterrs.append(TKS_cv_period_pct_error)
-				cv_ATTV_pcterrs.append(TKS_cv_amplitude_pct_error)
-				cv_phase_pcterrs.append(TKS_cv_phase_pct_error)			
+					cv_PTTV_pcterrs.append(TKS_cv_period_pct_error)
+					cv_ATTV_pcterrs.append(TKS_cv_amplitude_pct_error)
+					cv_phase_pcterrs.append(TKS_cv_phase_pct_error)		
+
+
 
 				entrynum += 1 #### advance the number of entries.
 
-
+			print(' ')
 
 
 		except:
@@ -713,6 +743,7 @@ try:
 	cv_PTTV_pcterrs = np.array(cv_PTTV_pcterrs)
 	cv_ATTV_pcterrs = np.array(cv_ATTV_pcterrs)
 	cv_phase_pcterrs = np.array(cv_phase_pcterrs)
+	deltaBICs = np.array(deltaBICs)
 
 
 	#### CUT BASED ON A BETTER THAN 5% ERROR ON PERIOD, AMPLITUDE AND PHASE ACROSS ALL SOLUTIONS.
@@ -748,6 +779,8 @@ try:
 
 
 	#### PLOT fmins vs P_plans for the multis in and not in the HL2017 catalog.
+	fig = plt.figure(figsize=(6,8))
+	ax = plt.subplot(111)
 	plt.scatter(P_plans[notin_HLcatalog_single_idxs], fmins[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
 	plt.scatter(P_plans[notin_HLcatalog_multi_idxs], fmins[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
 	plt.scatter(P_plans[in_HLcatalog_idxs], fmins[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
@@ -762,24 +795,28 @@ try:
 	plt.xscale('log')
 	plt.yscale('log')
 	plt.legend()
+	plt.subplots_adjust(left=0.125, bottom=0.09, right=0.9, top=0.95, wspace=0.2, hspace=0.2)
 	plt.show()
 
 
 
 	####### PLOT ATTV vs Pplan for single and multis (not in Hadden & Lithwick)
-	"""
+	fig = plt.figure(figsize=(6,8))
+	ax = plt.subplot(111)
 	plt.scatter(P_plans[notin_HLcatalog_single_idxs], TTV_amplitudes[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
 	plt.scatter(P_plans[notin_HLcatalog_multi_idxs], TTV_amplitudes[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
 	plt.scatter(P_plans[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
 	plt.xlabel(r'$P_{\mathrm{P}}$ [days]')
 	plt.ylabel('TTV amplitude [s]')
 	plt.yscale('log')
+	plt.xscale('log')
 	plt.legend()
+	plt.subplots_adjust(left=0.125, bottom=0.09, right=0.9, top=0.95, wspace=0.2, hspace=0.2)
 	plt.show()
-	"""
+	
 
 
-	######### PLOT ATTV vs PTTV for singles and multis (not in Hadden & Lithwick)
+	######### PLOT ATTV vs PTTV for singles and multis
 	"""
 	plt.scatter(P_TTVs[notin_HLcatalog_single_idxs], TTV_amplitudes[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
 	plt.scatter(P_TTVs[notin_HLcatalog_multi_idxs], TTV_amplitudes[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
@@ -985,7 +1022,6 @@ try:
 	plt.show()
 
 
-	deltaBICs = np.array(deltaBICs)
 
 	#### do the same for Delta-BICs (HL vs nonHL)
 	fig, (ax1, ax2) = plt.subplots(2, sharex=True)
@@ -1059,10 +1095,42 @@ try:
 		sim_Pplans = np.load(projectdir+'/sim_Pplans.npy')
 		sim_TTV_amplitudes = np.load(projectdir+'/sim_TTV_amplitudes.npy')
 
-	sim_TTV_amplitudes_minutes = sim_TTV_amplitudes / 60
-
 	#sim_PTTVs = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_PTTVs.npy')
 	#sim_Pplans = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_Pplans.npy')
+
+	##### NOW GRAB AS MANY sim_PTTV_results as you can.
+	nsims = len(sim_deltaBIC_list)
+	nsims_crossvaled = len(sim_cv_PTTV_pcterr)
+
+	if nsims_crossvaled < nsims:
+		sim_deltaBIC_list = sim_deltaBIC_list[:nsims_crossvaled]
+		sim_PTTVs = sim_PTTVs[:nsims_crossvaled]
+		sim_Pplans = sim_Pplans[:nsims_crossvaled]
+		sim_TTV_amplitudes = sim_TTV_amplitudes[:nsims_crossvaled]
+	elif nsims_crossvaled > nsims:
+		sim_cv_PTTV_pcterr = sim_cv_PTTV_pcterr[:nsims]
+		sim_cv_ATTV_pcterr = sim_cv_ATTV_pcterr[:nsims]
+		sim_cv_phase_pcterr = sim_cv_phase_pcterr[:nsims]
+	else:
+		#### they're equal length -- don't need to do anything.	
+		pass	
+
+	sim_cv_good_idxs = []
+	for i in np.arange(0,len(sim_cv_PTTV_pcterr),1):
+		if (sim_cv_PTTV_pcterr[i] <= 5) and (sim_cv_ATTV_pcterr[i] <= 5) and (sim_cv_phase_pcterr[i] <= 5):
+			sim_cv_good_idxs.append(i)
+	sim_cv_good_idxs = np.array(sim_cv_good_idxs)
+
+	#### SHOULD BE SAFE TO DO THIS -- WE'RE NOT PAIRING THEM UP WITH ANYTHING ELSE, SO MAKE THE CUT!
+	sim_deltaBIC_list = sim_deltaBIC_list[sim_cv_good_idxs]
+	sim_PTTVs = sim_PTTVs[sim_cv_good_idxs]
+	try:
+		sim_TTV_amplitudes = sim_TTV_amplitudes[sim_cv_good_idxs]
+	except:
+		pass
+	sim_Pplans = sim_Pplans[sim_cv_good_idxs]
+
+	sim_TTV_amplitudes_minutes = sim_TTV_amplitudes / 60
 
 
 
@@ -1085,7 +1153,7 @@ try:
 
 
 	row_labels = ['moon sims', 'singles', 'multis', 'HL2017', 'possible', 'impossible']
-	col_labels = [r'$P_{\mathrm{P}}$ [days]', r'$P_{\mathrm{TTV}}$ [epochs]', 'TTV amplitude [min]', r'$\Delta$BIC']
+	col_labels = [r'$P_{\mathrm{P}}$ [days]', r'$P_{\mathrm{TTV}}$ [epochs]', '$A_{\mathrm{TTV}}$ [min]', r'$\Delta$BIC']
 	column_list_of_lists = [Pplan_lists, PTTV_lists, TTVamp_lists, deltaBIC_lists]
 	bin_lists = [Pplan_bins, PTTV_bins, TTVamp_bins, deltaBIC_bins]
 	axis_scales = ['log', 'log', 'log', 'linear']
@@ -1095,7 +1163,7 @@ try:
 	nrows = 6 #### sim, single, multi, HL
 	ncols = 4 #### Pplan, PTTV, deltaBIC
 
-	fig, ax = plt.subplots(nrows,ncols) ### might need to reverse this
+	fig, ax = plt.subplots(nrows,ncols, figsize=(7,8)) ### might need to reverse this
 	#plt.figure(figsize=(8,8))
 	#gs1 = gridspec.Gridspec(nrows,ncols)
 	#gs1.update(hspace=0.05)
@@ -1111,7 +1179,6 @@ try:
 			ax[row][col].set_xscale(axis_scales[col]) 
 			if col == ncols-1:
 				ax[row][col].yaxis.set_label_position("right")
-				#ax[row][col].yaxis.tick_right()
 				ax[row][col].set_ylabel(row_labels[row])
 
 			if row == nrows-1:
@@ -1120,7 +1187,13 @@ try:
 			if row != nrows-1:
 				ax[row][col].set_xticklabels([])
 
-	plt.tight_layout()
+	#plt.tight_layout()
+	plt.subplots_adjust(left=0.125,
+                    bottom=0.1, 
+                    right=0.9, 
+                    top=0.95, 
+                    wspace=0.5, 
+                    hspace=0.15)
 	plt.show()
 
 
@@ -1193,6 +1266,7 @@ try:
 	ax6.set_xscale('log')
 	ax6.set_yscale('log')
 	ax6.set_title('impossible moon')
+	plt.subplots_adjust(left=0.125, bottom=0.09, right=0.9, top=0.95, wspace=0.2, hspace=0.2)
 	plt.show()
 
 
@@ -1221,18 +1295,20 @@ try:
 
 
 	
-	fig, ((ax1,ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(nrows=3,ncols=2, sharex=True, sharey=True)
+	colormap_choice = 'GnBu'
+	fig, ((ax1,ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(nrows=3,ncols=2, sharex=True, sharey=True, figsize=(6,8))
 	#### upper left
-	ax1.imshow(np.nan_to_num(sim_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+	ax1.imshow(np.nan_to_num(sim_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
 	ax1.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
 	ax1.set_yticks(np.arange(0,19,1)[::4])
 	ax1.set_yticklabels(np.around(np.log10(ycenters[::4]), 2))
+	#ax1.text(10**2.8, 10**1.8, 'Sims')
 
 	#### upper right
-	ax2.imshow(np.nan_to_num(single_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+	ax2.imshow(np.nan_to_num(single_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
 
 	#### middle left
-	ax3.imshow(np.nan_to_num(multi_nonHL_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+	ax3.imshow(np.nan_to_num(multi_nonHL_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
 	ax3.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
 	#ax3.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	ax3.set_xticks(np.arange(0,19,1)[::4])
@@ -1241,13 +1317,13 @@ try:
 	ax3.set_yticklabels(np.around(np.log10(ycenters[::4]),2))
 
 	#### middle right
-	ax4.imshow(np.nan_to_num(multi_HL_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+	ax4.imshow(np.nan_to_num(multi_HL_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
 	#ax4.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	ax4.set_xticks(np.arange(0,19,1)[::4])
 	ax4.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
 
 	#### lower left
-	ax5.imshow(np.nan_to_num(possible_moon_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+	ax5.imshow(np.nan_to_num(possible_moon_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
 	ax5.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
 	ax5.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	ax5.set_xticks(np.arange(0,19,1)[::4])
@@ -1256,10 +1332,18 @@ try:
 	ax5.set_yticklabels(np.around(np.log10(ycenters[::4]),2))
 
 	#### lower right
-	ax6.imshow(np.nan_to_num(impossible_moon_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap='coolwarm')
+	ax6.imshow(np.nan_to_num(impossible_moon_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
 	ax6.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	ax6.set_xticks(np.arange(0,19,1)[::4])
 	ax6.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+
+	plt.subplots_adjust(left=0.125,
+                    bottom=0.1, 
+                    right=0.9, 
+                    top=0.95, 
+                    wspace=0.15, 
+                    hspace=0.15)
+
 	plt.show()
 
 
