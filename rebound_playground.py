@@ -14,7 +14,7 @@ import socket
 from spock import FeatureClassifier
 import time
 
-
+plt.rcParams["font.family"] = 'serif'
 
 """
 This code will simulate planets and a system of 1 to 5 moons.
