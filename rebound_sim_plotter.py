@@ -91,6 +91,7 @@ try:
 		sims = np.array([sim_num])
 		show_individual_plots = 'y' 
 		fit_TTVs = 'y'
+		cross_validate_LSPs = 'n'
 
 
 
@@ -176,27 +177,42 @@ try:
 	TTV_amplitudes = []
 
 	for nsim,sim in enumerate(sims):
-		if (cross_validate_LSPs == 'y') and (str(sim) in cv_sims_examined):
-			print('sim '+str(sim)+' already cross-validated. skipping.')
-			continue
-
-		else:
-			try:
-				#### grab the sim index -- it should be the same! to calculate whether the TTV detection is robust.	
-				sim_cv_idx = np.where(np.array(crossvalfile['sim']).astype(str) == str(sim))[0]
-				print('sim, nsim, sim_cv_idx = ', sim, nsim, sim_cv_idx)
-				sim_cv_PTTV_pcterr = np.array(crossvalfile['PTTV_pcterr'])astype(float)[sim_cv_idx]
-				sim_cv_ATTV_pcterr = np.array(crossvalfile['ATTV_pcterr']).astype(float)[sim_cv_idx]
-				sim_cv_phase_pcterr = np.array(crossvalfile['phase_pcterr']).astype(float)[sim_cv_idx]
-				if (sim_cv_PTTV_pcterr <= 5) and (sim_cv_ATTV_pcterr <= 5) and (sim_cv_phase_pcterr <= 5):
-					sim_cv_results_robust = True
-				else:
-					sim_cv_results_robust = False
-			except:
-				raise Exception('Could not load the cross validation results.')
-
 
 		try:
+
+			"""
+			if (cross_validate_LSPs == 'y') and (str(sim) in cv_sims_examined):
+				print('sim '+str(sim)+' already cross-validated. skipping.')
+				continue
+
+			else:
+				try:
+					#### grab the sim index -- it should be the same! to calculate whether the TTV detection is robust.	
+					sim_cv_idx = np.where(np.array(crossvalfile['sim']).astype(str) == str(sim))[0][0]
+					print('sim, nsim, sim_cv_idx = ', sim, nsim, sim_cv_idx)
+					sim_cv_PTTV_pcterr = np.array(crossvalfile['PTTV_pcterr']).astype(float)[sim_cv_idx]
+					sim_cv_ATTV_pcterr = np.array(crossvalfile['ATTV_pcterr']).astype(float)[sim_cv_idx]
+					sim_cv_phase_pcterr = np.array(crossvalfile['phase_pcterr']).astype(float)[sim_cv_idx]
+					if (sim_cv_PTTV_pcterr <= 5) and (sim_cv_ATTV_pcterr <= 5) and (sim_cv_phase_pcterr <= 5):
+						sim_cv_results_robust = True
+					else:
+						sim_cv_results_robust = False
+				except:
+					#raise Exception('Could not load the cross validation results.')
+					#traceback.print_exc()
+					print('Something went wrong finding the sim_cv_correspondence. SKIPPING.')
+					Msats_over_Mps.append(np.nan)
+					sim_cv_results_robust_bool.append(np.nan)
+					deltaBIC_list.append(np.nan)
+					max_fractional_delta_rvals.append(np.nan) 
+					peak_power_periods_list.append(np.nan)
+					TTV_amplitudes.append(np.nan)
+					continue
+
+			"""
+			
+
+
 			print('sim # '+str(sim))
 			#### MODEL INPUTS
 			#dicttime1 = time.time()
@@ -370,11 +386,13 @@ try:
 
 			if show_individual_plots == 'y':
 				#### plot the periodogram
+				fig = plt.figure(figsize=(8,8))
 				plt.plot(periods, powers, c='DodgerBlue', linewidth=2, alpha=0.7)
 				plt.xlabel('Period [epochs]')
 				plt.ylabel('Power')
 				plt.xscale('log')
 				plt.title('best period = '+str(round(peak_power_period, 3))+' epochs')
+				plt.subplots_adjust(top=0.94, bottom=0.09)
 				plt.show()
 
 
@@ -404,6 +422,7 @@ try:
 
 				if show_individual_plots == 'y':
 					#### plot the TTVs -- and fit a best fitting SINUSOID BASED ON THE PERIODOGRAM PERIOD?
+					fig = plt.figure(figsize=(8,8))
 					plt.scatter(sim_TTV_epochs, sim_TTV_OminusC, facecolor='LightCoral', edgecolor='k', s=20, zorder=2)
 					plt.errorbar(sim_TTV_epochs, sim_TTV_OminusC, yerr=sim_TTV_errors, ecolor='k', zorder=1, fmt='none', alpha=0.5)
 					plt.plot(np.linspace(np.nanmin(sim_TTV_epochs), np.nanmax(sim_TTV_epochs), 100), np.linspace(0,0,100), color='k', linestyle=':', zorder=0)
@@ -411,6 +430,7 @@ try:
 					plt.xlabel('Epoch')
 					plt.ylabel('O - C [s]')
 					plt.title(r'$P = $'+str(round(peak_power_period,2))+r' epochs, $N_{S} = $'+str(sim_nmoons)+r', $\Delta \mathrm{BIC} = $'+str(round(deltaBIC, 2)))
+					plt.subplots_adjust(top=0.94, bottom=0.09)
 					plt.show()
 
 					###### DO A PHASE FOLD -- AND REFIT THE SIN
@@ -424,7 +444,7 @@ try:
 					phasefold_sinecurve_amplitude = np.nanmax(np.abs(phasefold_sinecurve))
 
 
-
+					fig = plt.figure(figsize=(8,8))
 					plt.scatter(phasefold_sim_TTV_epochs_sorted, phasefold_sim_TTV_OminusC_sorted, facecolor='LightCoral', edgecolor='k', s=20, zorder=2)
 					plt.errorbar(phasefold_sim_TTV_epochs_sorted, phasefold_sim_TTV_OminusC_sorted, yerr=phasefold_sim_TTV_errors_sorted, ecolor='k', zorder=1, fmt='none', alpha=0.5)
 					plt.plot(np.linspace(np.nanmin(phasefold_sim_TTV_epochs_sorted), np.nanmax(phasefold_sim_TTV_epochs_sorted), 100), np.linspace(0,0,100), color='k', linestyle=':', zorder=0)
@@ -433,6 +453,7 @@ try:
 					plt.xlabel('epochs [phase fold]')
 					plt.ylabel('O - C [s]')
 					plt.title(r'$P = $'+str(round(peak_power_period,2))+r' epochs, $N_{S} = $'+str(sim_nmoons)+r', $\Delta \mathrm{BIC} = $'+str(round(deltaBIC, 2)))
+					plt.subplots_adjust(top=0.94, bottom=0.09)
 					plt.show()					
 
 
@@ -473,6 +494,7 @@ try:
 			#### plot the positions
 			nparticles = sim_xpos.shape[0]
 			if show_individual_plots == 'y':
+				fig = plt.figure(figsize=(8,8))
 				#fig, ax = plt.figure(figsize=(6,6))
 				for particle in np.arange(0,nparticles,1):
 					part_xpos, part_ypos = sim_xpos[particle], sim_ypos[particle]
@@ -480,6 +502,7 @@ try:
 				plt.xlabel(r'$r \, / \, a_{I}$')
 				plt.ylabel(r'$r \, / \, a_{I}$')
 				plt.title("MEGNO = "+str(round(sim_MEGNO, 2))+', stability prob = '+str(round(sim_SPOCKprob*100,2))+'%')
+				plt.subplots_adjust(top=0.94, bottom=0.09)
 				plt.show()
 
 
@@ -533,6 +556,7 @@ try:
 	cv_robust_idxs = np.where(sim_cv_results_robust_bool == True)[0] #### CROSS-VALIDATION IS ROBUST -- <= 5% error on period, amplitude, and phase.
 	unstable_megno_idxs = np.concatenate((np.where(megno_vals < megno_min)[0], np.where(megno_vals > megno_max)[0]))
 	unstable_spockprobs = np.where(spockprobs < spock_min)[0]
+	stable_bool = []
 	stable_idxs = []
 	unstable_idxs = []
 
@@ -540,23 +564,28 @@ try:
 	for idx in np.arange(0,len(megno_vals),1):
 		if (idx in stable_spockprobs):
 			stable_idxs.append(idx) #### if SPOCK probability is good, we go with this
+			stable_bool.append(True)
 		
 		else:
 			#### it's not in stable_spockprobs
 			if np.isfinite(spockprobs[idx]) == True:
 				#### it's present, just not good enough
 				unstable_idxs.append(idx)
+				stable_bool.append(False)
 
 			else:
 				if idx in stable_megno_idxs:
 					stable_idxs.append(idx)
+					stable_bool.append(True)
 				else:
 					unstable_idxs.append(idx)
+					stable_bool.append(False)
 
 
 
 	stable_idxs = np.array(stable_idxs)		
 	unstable_idxs = np.array(unstable_idxs)
+	stable_bool = np.array(stable_bool)
 
 
 	try:
@@ -565,8 +594,19 @@ try:
 		for moonidx, nmoon in enumerate(np.arange(1,6,1)):
 			nmoon_idxs = np.where(nmoons == nmoon)[0]
 			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
-			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs].tolist()
+			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+			nmoon_good_deltaBIC_idxs = np.intersect1d(np.where(nmoons == nmoon)[0], np.where(deltaBIC_list <= -2)[0])
+			nmoon_good_deltaBIC_and_stable_idxs = np.intersect1d(nmoon_stable_idxs, nmoon_good_deltaBIC_idxs)
 			violin_data[moonidx] = nmoon_deltaBICs
+			print('nmoon = ', nmoon)
+			print('total available: ', len(nmoon_idxs))
+			print('number stable: ', len(nmoon_stable_idxs))
+			print('pct stable: ', (len(nmoon_stable_idxs) / len(nmoon_idxs))*100)
+			print('number w/ good deltaBIC: ', len(np.where(nmoon_deltaBICs <= -2)[0]))
+			print('pct w/ good deltaBIC: ', (len(np.where(nmoon_deltaBICs <= -2)[0]) / len(nmoon_idxs))*100)
+			print('number stable AND good deltaBIC: ', len(nmoon_good_deltaBIC_and_stable_idxs))
+			print('pct stable AND good deltaBIC: ', (len(nmoon_good_deltaBIC_and_stable_idxs) / len(nmoon_idxs))*100)
+			print(' ')
 		#create_violin(data, data_labels=None, x_label=None, y_label=None, plot_title=None, colormap='viridis')
 		create_violin(violin_data, data_labels=['1', '2', '3', '4','5'], x_label='# moons', y_label=r'$\Delta$ BIC', colormap='viridis', autoshow=False)
 		plt.plot(np.linspace(0,6,100), np.linspace(-2,-2,100), c='k', linestyle=':', alpha=0.7)
@@ -600,7 +640,7 @@ try:
 
 	##### make stable and unstable heatmaps, and then divide stable by total
 	#nmoons_masses_heatmap = np.zeros(shape=(20,5))
-	mass_bin_edges = np.logspace(-5,-2,20)
+	mass_bin_edges = np.logspace(-5,-2,20) #### make as many bins as possible, while keeping them all populated.
 	#mass_bin_edges = np.linspace(1e-5,1e-2,20)
 	moon_bin_edges = np.linspace(0.5,5.5,6) ### on the halves, because n=1 needs to go in the middle of the bin.
 	stable_heatmap = plt.hist2d(Msats_over_Mps[stable_idxs], nmoons[stable_idxs], bins=[mass_bin_edges, moon_bin_edges], cmap='coolwarm')[0]
@@ -819,14 +859,14 @@ try:
 		return amplitude * np.exp(-xvals / beta)
 
 
-	fig, ax = plt.subplots(5, sharex=True, figsize=(6,10))
+	fig, ax = plt.subplots(4, sharex=True, figsize=(6,10))
 	histdict = {}
-	for moon_number in np.arange(1,6,1):
+	for moon_number in np.arange(1,5,1):
 		nmoon_idxs = np.where(nmoons == moon_number)[0]
 		good_BIC_idxs = np.where(deltaBIC_list < -2)[0] #### positive evidence for a moon
 		nmoons_stable_idxs = np.intersect1d(nmoon_idxs, stable_idxs)
 		nmoons_stable_good_BIC_idxs = np.intersect1d(nmoons_stable_idxs, good_BIC_idxs)
-		nmoons_final_sample_idxs = np.intersect1d(nmoon_stable_good_BIC_idxs, cv_robust_idxs)
+		nmoons_final_sample_idxs = np.intersect1d(nmoons_stable_good_BIC_idxs, cv_robust_idxs)
 		TTV_period_bins = np.arange(2,20,1)
 
 
@@ -860,7 +900,7 @@ try:
 		print('N = '+str(moon_number)+'; y = '+str(round(expo_curve_popt[0],2))+' * e^(-'+str(round(1/expo_curve_popt[1],2))+'x)')
 
 
-	ax[4].set_xlabel('TTV period [epochs]')
+	ax[3].set_xlabel('TTV period [epochs]')
 	#plt.tight_layout()
 	plt.subplots_adjust(left=0.135, bottom=0.058, right=0.888, top=0.985, wspace=0.05, hspace=0.05)
 	plt.show()
@@ -966,7 +1006,7 @@ try:
 	"""
 
 
-
+	"""
 	#### SOMETHING IS WEIRD ABOUT THE GKDE -- try a heatmap (hist2d)
 	xbins = np.logspace(np.log10(10), np.log10(1500), 20) #### planet periods
 	ybins = np.logspace(np.log10(2), np.log10(100), 20) #### P_TTVs
@@ -991,12 +1031,12 @@ try:
 	plt.ylabel(r'$P_{\mathrm{TTV}}$ [epochs]')
 	#plt.title('Matplotlib 2D histogram')
 	plt.show()
+	"""
 
 
 
 
-
-	np.save('/data/tethys/Documents/Projects/NMoon_TTVs/simulated_PTTV10-1500_Pplan2-100_20x20_heatmap.npy', TTV_Pplan_hist2d)
+	#np.save('/data/tethys/Documents/Projects/NMoon_TTVs/simulated_PTTV10-1500_Pplan2-100_20x20_heatmap.npy', TTV_Pplan_hist2d)
 
 
 
@@ -1103,6 +1143,7 @@ try:
 
 
 	TTV_amplitudes = np.array(TTV_amplitudes)
+	TTV_amplitudes_minutes = TTV_amplitudes / 60
 	#### SAVE THIS STUFF
 	np.save(projectdir+'/sim_deltaBIC_list.npy', deltaBIC_list[good_BIC_stable_idxs])
 	np.save(projectdir+'/sim_PTTVs.npy', P_TTVs) #### these have already been culled as good_BIC_stable_idxs
@@ -1114,29 +1155,84 @@ try:
 
 
 	detectable_idxs = np.where(deltaBIC_list <= -2)[0]
-
+	P_TTVs = peak_power_periods_list
 	#### final statistics:
 	for nmoon in np.arange(1,6,1):
+		"""
 		print("Moon #: ", nmoon)
-		nmoon_idxs = np.where(nmoons == nmoon)[0]
-		nmoon_deltaBICs = deltaBIC_list[nmoon_idxs]
-		nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
-		nmoon_stable_detectable_idxs = []
-		for nmoon_idx in nmoon_idxs:
-			if (nmoon_idx in stable_idxs) and (nmoon_idx in detectable_idxs):
-				nmoon_stable_detectable_idxs.append(nmoon_idx)
-		nmoon_stable_detectable_idxs = np.array(nmoon_stable_detectable_idxs)
+		nmoon_idxs = np.where(nmoons == nmoon)[0] ### len == number of models with this architecture
+		nmoon_deltaBICs = deltaBIC_list[nmoon_idxs]  #### len == number of models with this architecture
+		nmoon_stable_bool = stable_bool[nmoon_idxs] 
+		nmoon_robust_bool = sim_cv_results_robust_bool[nmoon_idxs]
+		nmoon_stable_idxs = np.where(nmoon_deltaBICs <= -2)[0]
+		nmoon_nstable = len(nmoon_stable_idxs)
+		nmoon_detectable_idxs = np.where(nmoon_deltaBICs <= -2)[0]
+		nmoon_ndetectable = len(nmoon_detectable_idxs)
+		nmoon_robust_idxs = np.where(nmoon_robust_bool)[0]
+		nmoon_nrobust = len(nmoon_robust_idxs)
+		nmoon_stable_detectable_idxs = np.intersect1d(nmoon_stable_idxs, nmoon_detectable_idxs)
+		nmoon_stable_detectable_robust_idxs = np.intersect1d(nmoon_stable_detectable_idxs, nmoon_robust_idxs) 
+
 
 		print('# of moons: ', len(nmoon_idxs))
 		print("percent stable: ", len(nmoon_stable_idxs) / len(nmoon_idxs))
 		print("percent stable and detectable: ", len(nmoon_stable_detectable_idxs) / len(nmoon_idxs))
-		print('median P_TTV: ', np.nanmedian(peak_power_periods_list[nmoon_stable_detectable_idxs]))
+		print("percent stable, detectable, robust: ", len(nmoon_stable_detectable_robust_idxs) / len(nmoon_idxs))
+		print('median P_TTV: ', np.nanmedian(peak_power_periods_list[nmoon_stable_detectable_robust_idxs]))
 		#print("median A_TTV: ", np.nanmedian(TTV_amplitudes[nmoon_stable_detectable_idxs]))
-		print('median M_S / M_P: ', np.nanmedian(np.array(summaryfile['Mmoons_over_Mplan'])))
+		print('median M_S / M_P: ', np.nanmedian(np.array(summaryfile['Mmoons_over_Mplan'])[nmoon_stable_detectable_robust_idxs]))
 		print(' ')
 		print(' ')
+		"""
 
 
+		nmoon_idxs = np.where(nmoons == nmoon)[0]
+		
+		nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
+		nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+		nmoon_good_deltaBIC_idxs = np.intersect1d(np.where(nmoons == nmoon)[0], np.where(deltaBIC_list <= -2)[0])
+		nmoon_robust_idxs = np.intersect1d(np.where(nmoons == nmoon)[0], np.where(sim_cv_results_robust_bool == True)[0])
+
+
+
+		nmoon_good_deltaBIC_and_stable_idxs = np.intersect1d(nmoon_stable_idxs, nmoon_good_deltaBIC_idxs)
+		nmoon_good_deltaBIC_stable_and_robust_idxs = np.intersect1d(nmoon_good_deltaBIC_and_stable_idxs, nmoon_robust_idxs)
+
+		nmoon_final_idxs = nmoon_good_deltaBIC_stable_and_robust_idxs 
+		
+		nmoon_median_PTTV = np.nanmedian(P_TTVs[nmoon_final_idxs])
+		nmoon_PTTV_159 = np.nanpercentile(P_TTVs[nmoon_final_idxs], 15.9)
+		nmoon_PTTV_841 = np.nanpercentile(P_TTVs[nmoon_final_idxs], 84.1)
+		nmoon_PTTV_pm = (nmoon_PTTV_841 - nmoon_median_PTTV, nmoon_median_PTTV - nmoon_PTTV_159)
+		
+		nmoon_median_ATTV = np.nanmedian(TTV_amplitudes_minutes[nmoon_final_idxs])
+		nmoon_ATTV_159 = np.nanpercentile(TTV_amplitudes_minutes[nmoon_final_idxs], 15.9)
+		nmoon_ATTV_841 = np.nanpercentile(TTV_amplitudes_minutes[nmoon_final_idxs], 84.1)
+		nmoon_ATTV_pm = (nmoon_ATTV_841 - nmoon_median_ATTV, nmoon_median_ATTV - nmoon_ATTV_159)
+		
+		nmoon_median_MsMp = np.nanmedian(Msats_over_Mps[nmoon_final_idxs])
+		nmoon_MsMp_159 = np.nanpercentile(Msats_over_Mps[nmoon_final_idxs], 15.9)
+		nmoon_MsMp_841 = np.nanpercentile(Msats_over_Mps[nmoon_final_idxs], 84.1)
+		nmoon_MsMp_pm = (nmoon_MsMp_841 - nmoon_median_MsMp, nmoon_median_MsMp - nmoon_MsMp_159)
+
+
+
+
+		print('nmoon = ', nmoon)
+		print('total available: ', len(nmoon_idxs))
+		print('number stable: ', len(nmoon_stable_idxs))
+		print('pct stable: ', (len(nmoon_stable_idxs) / len(nmoon_idxs))*100)
+		print('number w/ good deltaBIC: ', len(np.where(nmoon_deltaBICs <= -2)[0]))
+		print('pct w/ good deltaBIC: ', (len(np.where(nmoon_deltaBICs <= -2)[0]) / len(nmoon_idxs))*100)
+		print('number stable AND good deltaBIC: ', len(nmoon_good_deltaBIC_and_stable_idxs))
+		print('pct stable AND good deltaBIC: ', (len(nmoon_good_deltaBIC_and_stable_idxs) / len(nmoon_idxs))*100)
+		print('number robust: ', len(nmoon_robust_idxs))
+		print('number, stable, detectable, robust = ', len(nmoon_good_deltaBIC_stable_and_robust_idxs))
+		print('pct stable, detectable, robust = ', (len(nmoon_good_deltaBIC_stable_and_robust_idxs) / len(nmoon_idxs))*100)
+		print("PTTV = $"+str(round(nmoon_median_PTTV,2))+'\,^{'+str(round(nmoon_PTTV_pm[0],2))+'}_{'+str(round(nmoon_PTTV_pm[1],2))+'}$')
+		print("ATTV = $"+str(round(nmoon_median_ATTV,2))+'\,^{'+str(round(nmoon_ATTV_pm[0],2))+'}_{'+str(round(nmoon_ATTV_pm[1],2))+'}$')
+		print("MsMp = $"+str(round(nmoon_median_MsMp,6))+'\,^{'+str(round(nmoon_MsMp_pm[0],6))+'}_{'+str(round(nmoon_MsMp_pm[1],6))+'}$')		
+		print(' ')
 
 
 
