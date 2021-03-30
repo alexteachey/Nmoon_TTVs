@@ -39,6 +39,7 @@ from scipy.stats import skew, kurtosis
 
 plt.rcParams["font.family"] = 'serif'
 
+sim_prefix = input('What is the sim_prefix? ')
 
 ####### FILE DIRECTORY INFORMATION
 if socket.gethostname() == 'tethys.asiaa.sinica.edu.tw':
@@ -49,11 +50,19 @@ elif socket.gethostname() == 'Alexs-MacBook-Pro.local':
 else:
 	projectdir = input('Please input the project directory: ')
 
-positionsdir = projectdir+'/sim_positions'
-ttvfiledir = projectdir+'/sim_TTVs'
-LSdir = projectdir+'/sim_periodograms'
-modeldictdir = projectdir+'/sim_model_settings'
-plotdir = projectdir+'/sim_plots'
+if sim_prefix == '':
+	positionsdir = projectdir+'/sim_positions'
+	ttvfiledir = projectdir+'/sim_TTVs'
+	LSdir = projectdir+'/sim_periodograms'
+	modeldictdir = projectdir+'/sim_model_settings'
+	plotdir = projectdir+'/sim_plots'
+
+else:
+	positionsdir = projectdir+'/'+sim_prefix+'_sim_positions'
+	ttvfiledir = projectdir+'/'+sim_prefix+'_sim_TTVs'
+	LSdir = projectdir+'/'+sim_prefix+'_sim_periodograms'
+	modeldictdir = projectdir+'/'+sim_prefix+'_sim_model_settings'
+	plotdir = projectdir+'/'+sim_prefix+'_sim_plots'
 ###################################
 
 
@@ -128,6 +137,8 @@ try:
 		### just do a single trial
 		cv_frac_to_leave_out = 0
 		cv_ntrials = 1
+
+	exclude_short_periods = input('Do you want to exclude short period planets? (recommend y): ')
 
 
 	################ LOAD TTVs ##################################
@@ -239,6 +250,12 @@ try:
 		this_planet_idx = np.where(kep == kepois)[0]
 		this_planet_period = kepoi_periods[this_planet_idx][0]
 		this_planet_order_number_idx = np.where(all_system_planet_periods_sorted == this_planet_period)[0]
+
+		#if (exclude_short_periods == 'y') and (float(this_planet_period) < 10): ##### the lower limit on your sims!
+		#	print("SHORT PERIOD PLANET! SKIPPING.")
+		#	continue 
+
+
 		try:
 			next_highest_period = all_system_planet_periods_sorted[this_planet_order_number_idx+1]
 		except:
@@ -434,10 +451,18 @@ try:
 	entrynum = 0
 	for nkepoi, kepoi in enumerate(kepois):
 
-		if (cross_validate_LSPs == 'y') and (str(kepoi) in cv_kepois_examined):
-			print('ALREADY EXAMINED. SKIPPING.')
-			print(' ')
-			continue
+		this_planet_idx = np.where(kepoi == kepois)[0]
+		this_planet_period = kepoi_periods[this_planet_idx][0]
+
+		if (exclude_short_periods == 'y') and (float(this_planet_period) < 10): ##### the lower limit on your sims!
+			print("SHORT PERIOD PLANET! SKIPPING.")
+			continue 
+
+
+		#if (cross_validate_LSPs == 'y') and (str(kepoi) in cv_kepois_examined):
+		#	print('ALREADY EXAMINED. SKIPPING.')
+		#	print(' ')
+		#	continue
 
 		if nkepoi in FP_idxs:
 			print('Skipping false positive: ', kepoi)
@@ -799,8 +824,32 @@ try:
 	plt.show()
 
 
+	#### PLOT fmins vs P_TTVs! for the multis in and not in the HL2017 catalog. DOES THIS SHOW ANYTHING?!
+	fig = plt.figure(figsize=(6,8))
+	ax = plt.subplot(111)
+	plt.scatter(P_TTVs[notin_HLcatalog_single_idxs], fmins[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
+	plt.scatter(P_TTVs[notin_HLcatalog_multi_idxs], fmins[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
+	plt.scatter(P_TTVs[in_HLcatalog_idxs], fmins[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
+	plt.plot(np.linspace(np.nanmin(P_TTVs), np.nanmax(P_TTVs), 100), np.linspace(0.4895, 0.4895, 100), c='k', linestyle='--', linewidth=2)
+	plt.fill_between(np.linspace(np.nanmin(P_TTVs), np.nanmax(P_TTVs), 100), 1e-5, 0.4895, color='green', alpha=0.1)
+	plt.fill_between(np.linspace(np.nanmin(P_TTVs), np.nanmax(P_TTVs), 100), 0.4895, 1e5, color='red', alpha=0.1)
+	plt.ylim(np.nanmin(fmins), np.nanmax(fmins))
 
-	####### PLOT ATTV vs Pplan for single and multis (not in Hadden & Lithwick)
+	plt.xlim(np.nanmin(P_plans), np.nanmax(P_plans))
+	plt.xlabel(r'$P_{\mathrm{TTV}}$ [epochs]')
+	plt.ylabel(r'minimum fraction $R_{\mathrm{Hill}}$')
+	plt.xscale('log')
+	plt.yscale('log')
+	plt.legend()
+	plt.subplots_adjust(left=0.125, bottom=0.09, right=0.9, top=0.95, wspace=0.2, hspace=0.2)
+	plt.show()
+
+
+
+
+
+
+	####### PLOT ATTV vs Pplan for single and multis
 	fig = plt.figure(figsize=(6,8))
 	ax = plt.subplot(111)
 	plt.scatter(P_plans[notin_HLcatalog_single_idxs], TTV_amplitudes[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
@@ -817,17 +866,17 @@ try:
 
 
 	######### PLOT ATTV vs PTTV for singles and multis
-	"""
-	plt.scatter(P_TTVs[notin_HLcatalog_single_idxs], TTV_amplitudes[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
-	plt.scatter(P_TTVs[notin_HLcatalog_multi_idxs], TTV_amplitudes[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
-	plt.scatter(P_TTVs[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
-	plt.xlabel(r'$P_{\mathrm{TTV}}$ [epochs]')
-	plt.ylabel('TTV amplitude [s]')
+	
+	plt.scatter(TTV_amplitudes[notin_HLcatalog_single_idxs], P_TTVs[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
+	plt.scatter(TTV_amplitudes[notin_HLcatalog_multi_idxs], P_TTVs[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
+	plt.scatter(TTV_amplitudes[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
+	plt.ylabel(r'$P_{\mathrm{TTV}}$ [epochs]')
+	plt.xlabel('TTV amplitude [s]')
 	plt.yscale('log')
 	plt.xscale('log')
 	plt.legend()
 	plt.show()
-	"""
+	
 
 
 	########### PLOT PTTV vs Pplan for singles and multis (not in HL2017)
@@ -1084,16 +1133,29 @@ try:
 
 	##### LOAD SIMULATION VALUES.
 	try:
-		sim_deltaBIC_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_deltaBIC_list.npy')
-		sim_PTTVs = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_PTTVs.npy')
-		sim_Pplans = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_Pplans.npy')
-		sim_TTV_amplitudes = np.load('/data/tethys/Dcuments/Projects/NMoon_TTVs/sim_TTV_amplitudes.npy')
+		if sim_prefix == '':		
+			sim_deltaBIC_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_deltaBIC_list.npy')
+			sim_PTTVs = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_PTTVs.npy')
+			sim_Pplans = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_Pplans.npy')
+			sim_TTV_amplitudes = np.load('/data/tethys/Dcuments/Projects/NMoon_TTVs/sim_TTV_amplitudes.npy')
+		else:
+			sim_deltaBIC_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/'+sim_prefix+'_sim_deltaBIC_list.npy')
+			sim_PTTVs = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/'+sim_prefix+'_sim_PTTVs.npy')
+			sim_Pplans = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/'+sim_prefix+'_sim_Pplans.npy')
+			sim_TTV_amplitudes = np.load('/data/tethys/Dcuments/Projects/NMoon_TTVs/'+sim_prefix+'_sim_TTV_amplitudes.npy')
+
 
 	except:
-		sim_deltaBIC_list = np.load(projectdir+'/sim_deltaBIC_list.npy')
-		sim_PTTVs = np.load(projectdir+'/sim_PTTVs.npy')
-		sim_Pplans = np.load(projectdir+'/sim_Pplans.npy')
-		sim_TTV_amplitudes = np.load(projectdir+'/sim_TTV_amplitudes.npy')
+		if sim_prefix == '':
+			sim_deltaBIC_list = np.load(projectdir+'/sim_deltaBIC_list.npy')
+			sim_PTTVs = np.load(projectdir+'/sim_PTTVs.npy')
+			sim_Pplans = np.load(projectdir+'/sim_Pplans.npy')
+			sim_TTV_amplitudes = np.load(projectdir+'/sim_TTV_amplitudes.npy')
+		else:
+			sim_deltaBIC_list = np.load(projectdir+'/'+sim_prefix+'_sim_deltaBIC_list.npy')
+			sim_PTTVs = np.load(projectdir+'/'+sim_prefix+'_sim_PTTVs.npy')
+			sim_Pplans = np.load(projectdir+'/'+sim_prefix+'_sim_Pplans.npy')
+			sim_TTV_amplitudes = np.load(projectdir+'/'+sim_prefix+'_sim_TTV_amplitudes.npy')
 
 	#sim_PTTVs = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_PTTVs.npy')
 	#sim_Pplans = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_Pplans.npy')
@@ -1194,6 +1256,9 @@ try:
                     top=0.95, 
                     wspace=0.5, 
                     hspace=0.15)
+
+	plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/histogram_6x4_real_planets.pdf', dpi=300)
+
 	plt.show()
 
 
@@ -1224,12 +1289,16 @@ try:
 
 
 
+	fig, ax1 = plt.subplots(nrows=1,ncols=1)
+	all_holczer_heatmap = ax1.hist2d(P_plans, P_TTVs, bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
+	ax1.set_xscale('log')
+	ax1.set_yscale('log')
+	ax1.set_title('Holczer 2016')
+	plt.show()
 
 
 
-
-
-	#### 4 panel heatmaps
+	#### 6 panel heatmaps
 	fig, ((ax1,ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(nrows=3,ncols=2)
 	sim_heatmap = ax1.hist2d(sim_Pplans, sim_PTTVs, bins=[xbins, ybins], cmap='coolwarm', density=False)[0]
 	#ax1.scatter(sim_Pplans, sim_PTTVs, facecolor='w', edgecolor='k', alpha=0.2, s=10)
@@ -1275,6 +1344,15 @@ try:
 
 
 	####### HEATMAPS NORMALIZED BY NUMBER OF SYSTEMS IN THE PERIOD BIN!
+	all_holczer_heatmap_normalized = np.zeros(shape=all_holczer_heatmap.shape)
+	sim_heatmap_normalized = np.zeros(shape=sim_heatmap.shape)
+	single_heatmap_normalized = np.zeros(shape=single_heatmap.shape)
+	multi_nonHL_heatmap_normalized = np.zeros(shape=multi_nonHL_heatmap.shape)
+	multi_HL_heatmap_normalized = np.zeros(shape=multi_HL_heatmap.shape)
+	possible_moon_heatmap_normalized = np.zeros(shape=possible_moon_heatmap.shape)
+	impossible_moon_heatmap_normalized = np.zeros(shape=impossible_moon_heatmap.shape)
+
+	all_holczer_heatmap_frac_of_Pplan = np.zeros(shape=all_holczer_heatmap.shape)
 	sim_heatmap_frac_of_Pplan = np.zeros(shape=sim_heatmap.shape)
 	single_heatmap_frac_of_Pplan = np.zeros(shape=single_heatmap.shape)
 	multi_nonHL_heatmap_frac_of_Pplan = np.zeros(shape=multi_nonHL_heatmap.shape)
@@ -1286,29 +1364,41 @@ try:
 	nrows, ncols = sim_heatmap.shape
 
 	for col in np.arange(0,ncols,1):
-		sim_heatmap_frac_of_Pplan[col] = (sim_heatmap[col] - np.nanmin(sim_heatmap[col])) / (np.nanmax(sim_heatmap[col]) - np.nanmin(sim_heatmap[col]))
-		single_heatmap_frac_of_Pplan[col] = (single_heatmap[col] - np.nanmin(single_heatmap[col])) / (np.nanmax(single_heatmap[col]) - np.nanmin(single_heatmap[col]))
-		multi_nonHL_heatmap_frac_of_Pplan[col] = (multi_nonHL_heatmap[col] - np.nanmin(multi_nonHL_heatmap[col])) / (np.nanmax(multi_nonHL_heatmap[col]) - np.nanmin(multi_nonHL_heatmap[col]))
-		multi_HL_heatmap_frac_of_Pplan[col] = (multi_HL_heatmap[col] - np.nanmin(multi_HL_heatmap[col])) / (np.nanmax(multi_HL_heatmap[col]) - np.nanmin(multi_HL_heatmap[col]))
-		possible_moon_heatmap_frac_of_Pplan[col] = (possible_moon_heatmap[col] - np.nanmin(possible_moon_heatmap[col])) / (np.nanmax(possible_moon_heatmap[col]) - np.nanmin(possible_moon_heatmap[col]))
-		impossible_moon_heatmap_frac_of_Pplan[col] = (impossible_moon_heatmap[col] - np.nanmin(impossible_moon_heatmap[col])) / (np.nanmax(impossible_moon_heatmap[col]) - np.nanmin(impossible_moon_heatmap[col]))
+		all_holczer_heatmap_normalized[col] = (all_holczer_heatmap[col] - np.nanmin(all_holczer_heatmap[col])) / (np.nanmax(all_holczer_heatmap[col]) - np.nanmin(all_holczer_heatmap[col]))
+		sim_heatmap_normalized[col] = (sim_heatmap[col] - np.nanmin(sim_heatmap[col])) / (np.nanmax(sim_heatmap[col]) - np.nanmin(sim_heatmap[col]))
+		single_heatmap_normalized[col] = (single_heatmap[col] - np.nanmin(single_heatmap[col])) / (np.nanmax(single_heatmap[col]) - np.nanmin(single_heatmap[col]))
+		multi_nonHL_heatmap_normalized[col] = (multi_nonHL_heatmap[col] - np.nanmin(multi_nonHL_heatmap[col])) / (np.nanmax(multi_nonHL_heatmap[col]) - np.nanmin(multi_nonHL_heatmap[col]))
+		multi_HL_heatmap_normalized[col] = (multi_HL_heatmap[col] - np.nanmin(multi_HL_heatmap[col])) / (np.nanmax(multi_HL_heatmap[col]) - np.nanmin(multi_HL_heatmap[col]))
+		possible_moon_heatmap_normalized[col] = (possible_moon_heatmap[col] - np.nanmin(possible_moon_heatmap[col])) / (np.nanmax(possible_moon_heatmap[col]) - np.nanmin(possible_moon_heatmap[col]))
+		impossible_moon_heatmap_normalized[col] = (impossible_moon_heatmap[col] - np.nanmin(impossible_moon_heatmap[col])) / (np.nanmax(impossible_moon_heatmap[col]) - np.nanmin(impossible_moon_heatmap[col]))
 
 
-	
+
+		all_holczer_heatmap_frac_of_Pplan[col] = all_holczer_heatmap[col] / np.nansum(all_holczer_heatmap[col]) #
+		sim_heatmap_frac_of_Pplan[col] = sim_heatmap[col] / np.nansum(sim_heatmap[col]) 
+		single_heatmap_frac_of_Pplan[col] = single_heatmap[col] / np.nansum(single_heatmap[col]) 
+		multi_nonHL_heatmap_frac_of_Pplan[col] = multi_nonHL_heatmap[col] / np.nansum(multi_nonHL_heatmap[col]) 
+		multi_HL_heatmap_frac_of_Pplan[col] = multi_HL_heatmap[col] / np.nansum(multi_HL_heatmap[col]) 
+		possible_moon_heatmap_frac_of_Pplan[col] = possible_moon_heatmap[col] / np.nansum(possible_moon_heatmap[col]) 
+		impossible_moon_heatmap_frac_of_Pplan[col] = impossible_moon_heatmap[col] / np.nansum(impossible_moon_heatmap[col])
+
+
+
+	##### PLOT THE NORMALIZED VERSION		
 	colormap_choice = 'GnBu'
 	fig, ((ax1,ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(nrows=3,ncols=2, sharex=True, sharey=True, figsize=(6,8))
 	#### upper left
-	ax1.imshow(np.nan_to_num(sim_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
+	ax1.imshow(np.nan_to_num(sim_heatmap_normalized.T), origin='lower', aspect='auto', cmap=colormap_choice)
 	ax1.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
 	ax1.set_yticks(np.arange(0,19,1)[::4])
 	ax1.set_yticklabels(np.around(np.log10(ycenters[::4]), 2))
 	#ax1.text(10**2.8, 10**1.8, 'Sims')
 
 	#### upper right
-	ax2.imshow(np.nan_to_num(single_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
+	ax2.imshow(np.nan_to_num(single_heatmap_normalized.T), origin='lower', aspect='auto', cmap=colormap_choice)
 
 	#### middle left
-	ax3.imshow(np.nan_to_num(multi_nonHL_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
+	ax3.imshow(np.nan_to_num(multi_nonHL_heatmap_normalized.T), origin='lower', aspect='auto', cmap=colormap_choice)
 	ax3.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
 	#ax3.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	ax3.set_xticks(np.arange(0,19,1)[::4])
@@ -1317,13 +1407,13 @@ try:
 	ax3.set_yticklabels(np.around(np.log10(ycenters[::4]),2))
 
 	#### middle right
-	ax4.imshow(np.nan_to_num(multi_HL_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
+	ax4.imshow(np.nan_to_num(multi_HL_heatmap_normalized.T), origin='lower', aspect='auto', cmap=colormap_choice)
 	#ax4.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	ax4.set_xticks(np.arange(0,19,1)[::4])
 	ax4.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
 
 	#### lower left
-	ax5.imshow(np.nan_to_num(possible_moon_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
+	ax5.imshow(np.nan_to_num(possible_moon_heatmap_normalized.T), origin='lower', aspect='auto', cmap=colormap_choice)
 	ax5.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
 	ax5.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	ax5.set_xticks(np.arange(0,19,1)[::4])
@@ -1332,7 +1422,7 @@ try:
 	ax5.set_yticklabels(np.around(np.log10(ycenters[::4]),2))
 
 	#### lower right
-	ax6.imshow(np.nan_to_num(impossible_moon_heatmap_frac_of_Pplan.T), origin='lower', aspect='auto', cmap=colormap_choice)
+	ax6.imshow(np.nan_to_num(impossible_moon_heatmap_normalized.T), origin='lower', aspect='auto', cmap=colormap_choice)
 	ax6.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
 	ax6.set_xticks(np.arange(0,19,1)[::4])
 	ax6.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
@@ -1349,6 +1439,152 @@ try:
 
 
 
+
+
+	#### PLOT THE FRACTION OF THE COLUMN VERSION
+	colormap_choice = 'GnBu'
+	fig, ((ax1,ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(nrows=3,ncols=2, sharex=True, sharey=True, figsize=(6,8))
+	#### upper left
+	ax1.imshow(np.nan_to_num(sim_heatmap_frac_of_Pplan.T), vmax=0.5, origin='lower', aspect='auto', cmap=colormap_choice)
+	ax1.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
+	ax1.set_yticks(np.arange(0,19,1)[::4])
+	ax1.set_yticklabels(np.around(np.log10(ycenters[::4]), 2))
+	#ax1.text(10**2.8, 10**1.8, 'Sims')
+
+	#### upper right
+	ax2.imshow(np.nan_to_num(single_heatmap_frac_of_Pplan.T),vmax=0.5, origin='lower', aspect='auto', cmap=colormap_choice)
+
+	#### middle left
+	ax3.imshow(np.nan_to_num(multi_nonHL_heatmap_frac_of_Pplan.T),vmax=0.5, origin='lower', aspect='auto', cmap=colormap_choice)
+	ax3.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
+	#ax3.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	ax3.set_xticks(np.arange(0,19,1)[::4])
+	ax3.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+	ax3.set_yticks(np.arange(0,19,1)[::4])
+	ax3.set_yticklabels(np.around(np.log10(ycenters[::4]),2))
+
+	#### middle right
+	ax4.imshow(np.nan_to_num(multi_HL_heatmap_frac_of_Pplan.T), vmax=0.5, origin='lower', aspect='auto', cmap=colormap_choice)
+	#ax4.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	ax4.set_xticks(np.arange(0,19,1)[::4])
+	ax4.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+
+	#### lower left
+	ax5.imshow(np.nan_to_num(possible_moon_heatmap_frac_of_Pplan.T), vmax=0.5, origin='lower', aspect='auto', cmap=colormap_choice)
+	ax5.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
+	ax5.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	ax5.set_xticks(np.arange(0,19,1)[::4])
+	ax5.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+	ax5.set_yticks(np.arange(0,19,1)[::4])
+	ax5.set_yticklabels(np.around(np.log10(ycenters[::4]),2))
+
+	#### lower right
+	ax6.imshow(np.nan_to_num(impossible_moon_heatmap_frac_of_Pplan.T), vmax=0.5, origin='lower', aspect='auto', cmap=colormap_choice)
+	ax6.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	ax6.set_xticks(np.arange(0,19,1)[::4])
+	ax6.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+
+	plt.subplots_adjust(left=0.125,
+                    bottom=0.1, 
+                    right=0.9, 
+                    top=0.95, 
+                    wspace=0.15, 
+                    hspace=0.15)
+
+	plt.show()
+
+
+
+
+
+
+
+	def normalizer(values):
+		return (values - np.nanmin(values)) / (np.nanmax(values) - np.nanmin(values))
+
+
+
+
+
+
+	##### DO THE PROBABILITY MATH 
+	#### UNIFORM P(moon | Pp):
+	Pmoon_giv_PTTV_Pplan_uniform = sim_heatmap_frac_of_Pplan.T / all_holczer_heatmap_frac_of_Pplan.T
+
+	#### propto period
+	Pmoon_giv_PTTV_Pplan_propto_P = (sim_heatmap_frac_of_Pplan.T * xcenters) / all_holczer_heatmap_frac_of_Pplan.T
+
+	#### propto P^2
+	Pmoon_giv_PTTV_Pplan_propto_P2 = (sim_heatmap_frac_of_Pplan.T * xcenters**2) / all_holczer_heatmap_frac_of_Pplan.T
+
+	#### propto 1/P
+	Pmoon_giv_PTTV_Pplan_propto_1oP = (sim_heatmap_frac_of_Pplan.T * (1/xcenters)) / all_holczer_heatmap_frac_of_Pplan.T
+
+
+	#### LET'S LOOK AT JUST THESE
+
+	a = Pmoon_giv_PTTV_Pplan_uniform
+	b = Pmoon_giv_PTTV_Pplan_propto_P
+	c = Pmoon_giv_PTTV_Pplan_propto_P2
+	d = Pmoon_giv_PTTV_Pplan_propto_1oP
+
+
+	fig = plt.figure(figsize=(6,6))
+	ax = plt.subplot(111)
+	ax.imshow(Pmoon_giv_PTTV_Pplan_uniform, origin='lower', aspect='auto')
+	ax.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
+	ax.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	ax.set_xticks(np.arange(0,19,1)[::4])
+	ax.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+	ax.set_yticks(np.arange(0,19,1)[::4])
+	ax.set_yticklabels(np.around(np.log10(ycenters[::4]),2))
+	plt.subplots_adjust(left=0.125,
+                   	bottom=0.1, 
+                    right=0.9, 
+                    top=0.95, 
+                    wspace=0.15, 
+                    hspace=0.15)
+	plt.show()
+
+
+
+	#### now plot them
+
+	colormap_choice = 'GnBu'
+	fig, ((ax1,ax2), (ax3, ax4)) = plt.subplots(nrows=2,ncols=2, sharex=True, sharey=True, figsize=(8,8))
+	#### upper left
+	ax1.imshow(Pmoon_giv_PTTV_Pplan_uniform, origin='lower', aspect='auto', cmap=colormap_choice)
+	ax1.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
+	ax1.set_yticks(np.arange(0,19,1)[::4])
+	ax1.set_yticklabels(np.around(np.log10(ycenters[::4]), 2))
+	#ax1.text(10**2.8, 10**1.8, 'Sims')
+
+	#### upper right
+	ax2.imshow(Pmoon_giv_PTTV_Pplan_propto_1oP, origin='lower', aspect='auto', cmap=colormap_choice)
+
+	#### lower left
+	ax3.imshow(Pmoon_giv_PTTV_Pplan_propto_P, origin='lower', aspect='auto', cmap=colormap_choice)
+	ax3.set_ylabel(r'$\log_{10} \, P_{\mathrm{TTV}}$ [epochs]')
+	ax3.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	ax3.set_xticks(np.arange(0,19,1)[::4])
+	ax3.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+	ax3.set_yticks(np.arange(0,19,1)[::4])
+	ax3.set_yticklabels(np.around(np.log10(ycenters[::4]),2))
+
+	#### lower right
+	ax4.imshow(Pmoon_giv_PTTV_Pplan_propto_P2, origin='lower', aspect='auto', cmap=colormap_choice)
+	ax4.set_xlabel(r'$\log_{10} \, P_{\mathrm{P}}$ [days]')
+	ax4.set_xticks(np.arange(0,19,1)[::4])
+	ax4.set_xticklabels(np.around(np.log10(xcenters[::4]),2))
+
+	plt.subplots_adjust(left=0.125,
+                    bottom=0.1, 
+                    right=0.9, 
+                    top=0.95, 
+                    wspace=0.15, 
+                    hspace=0.15)
+
+	plt.show()
 
 
 

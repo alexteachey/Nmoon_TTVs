@@ -8,6 +8,9 @@ import matplotlib.cm as cm
 from scipy.stats import loguniform
 import traceback
 
+plt.rcParams["font.family"] = 'serif'
+
+
 try:
 	##### this script will compare the simulated PTTV-vs_Pplan plot with the mazeh catalog version.
 	####### AND -- attempt to compute a moon probability (a la your paper) based on these abundances.
