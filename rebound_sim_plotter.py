@@ -23,6 +23,7 @@ plt.rcParams["font.family"] = 'serif'
 
 
 sim_prefix = input('What is the prefix of the run? (leave blank for the most recent run: ')
+use_BIC_or_AIC = input("Do you want to use 'B'IC or 'A'IC? ")
 
 if (len(sim_prefix) != 0) and os.path.exists('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/'+sim_prefix) == False:
 	#### make it
@@ -44,6 +45,9 @@ def chisquare(data,model,error):
 
 def BIC(nparams,data,model,error):
 	return nparams*np.log(len(data)) + chisquare(data,model,error)
+
+def AIC(nparams,data,model,error):
+	return 2*nparams + chisquare(data,model,error)
 
 
 def hmcontour(xvals, yvals, bins=[20,20], levels=5, colors='k'):
@@ -118,7 +122,7 @@ try:
 		show_individual_plots = input('Do you want to show individual system plots? y/n: ')
 		fit_TTVs = input('Do you want to fit the TTVs (slow)? y/n: ')
 		sim_obs_summary = open(projectdir+'/'+sim_prefix_+'simulated_observations.csv', mode='w')
-		sim_obs_summary.write('sim,Nmoons,Pplan_days,ntransits,TTV_rmsamp_sec,TTVperiod_epochs,peak_power,fit_sineamp,deltaBIC,MEGNO,SPOCK_prob\n')
+		sim_obs_summary.write('sim,Nmoons,Pplan_days,ntransits,TTV_rmsamp_sec,TTVperiod_epochs,peak_power,fit_sineamp,deltaBIC,deltaAIC,MEGNO,SPOCK_prob\n')
 		sim_obs_summary.close()
 
 		cross_validate_LSPs = input('Do you want to do the cross-validation on PTTV periods? ')
@@ -130,6 +134,7 @@ try:
 
 	#### NEW SUMMARY STATISTICS LISTS
 	deltaBIC_list = []
+	deltaAIC_list = []
 	max_fractional_delta_rvals = []
 	Msats_over_Mps = []
 	Pplans_days = []
@@ -193,17 +198,21 @@ try:
 
 	if cross_validate_LSPs == 'y':
 		cvpath = '/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/'+sim_prefix+'sim_PTTV_results.csv'
-		if os.path.exists(cvpath):
+		try:
+			if os.path.exists(cvpath):
 
-			### find last record KOI number:
-			crossvalfile = pandas.read_csv(cvpath)
-			cv_sims_examined = np.array(crossvalfile['sim']).astype(str)
+				### find last record KOI number:
+				crossvalfile = pandas.read_csv(cvpath)
+				cv_sims_examined = np.array(crossvalfile['sim']).astype(str)
 
-		else:
-			crossval_resultsfile = open(cvpath, mode='w')
-			crossval_resultsfile.write('sim,n_crossval_trials,n_epochs,n_removed,PTTV_median,PTTV_std,PTTV_skew,PTTV_kurtosis,PTTV_pcterr,ATTV_median,ATTV_std,ATTV_pcterr,phase_median,phase_std,phase_pcterr,deltaBIC,deltaBIC_std\n')
-			crossval_resultsfile.close()
-			cv_sims_examined = np.array([])
+			else:
+				crossval_resultsfile = open(cvpath, mode='w')
+				crossval_resultsfile.write('sim,n_crossval_trials,n_epochs,n_removed,PTTV_median,PTTV_std,PTTV_skew,PTTV_kurtosis,PTTV_pcterr,ATTV_median,ATTV_std,ATTV_pcterr,phase_median,phase_std,phase_pcterr,deltaBIC,deltaBIC_std,deltaAIC,deltaAIC_std\n')
+				crossval_resultsfile.close()
+				cv_sims_examined = np.array([])
+		except:
+			pass
+
 
 	else:
 		try:
@@ -321,6 +330,7 @@ try:
 				#### lists to be used for evaluating the robustness of the periodogram results.
 				cv_best_periods = []
 				cv_deltaBICs = []
+				cv_deltaAICs = []
 				cv_amplitudes = []
 				cv_phases = []
 				cv_popts = []
@@ -379,15 +389,28 @@ try:
 					cv_phases.append(popt[1])
 					
 					#### calculate BIC and deltaBIC -- USE ALL THE DATAPOINTS!
-					BIC_flat = chisquare(data=sim_TTV_OminusC, model=np.linspace(0,0,len(sim_TTV_OminusC)),error=sim_TTV_errors) #k = 2
-					BIC_curve = 2*np.log(len(sim_TTV_OminusC)) + chisquare(data=sim_TTV_OminusC, model=sinecurve(sim_TTV_epochs, *popt), error=sim_TTV_errors)
+					#### OLD WAY BELOW 
+					#BIC_flat = chisquare(data=sim_TTV_OminusC, model=np.linspace(0,0,len(sim_TTV_OminusC)),error=sim_TTV_errors) #k = 0
+					#BIC_curve = 2*np.log(len(sim_TTV_OminusC)) + chisquare(data=sim_TTV_OminusC, model=sinecurve(sim_TTV_epochs, *popt), error=sim_TTV_errors) # k=2
+
+					#### NEW WAY -- APRIL 1 2021
+					#def BIC(nparams,data,model,error):
+					#def AIC(nparams,data,model,error):
+					BIC_flat = BIC(nparams=0, data=sim_TTV_OminusC, model=np.linspace(0,0,len(sim_TTV_OminusC)), error=sim_TTV_errors)
+					BIC_curve = BIC(nparams=2, data=sim_TTV_OminusC, model=sinecurve(sim_TTV_epochs, *popt), error=sim_TTV_errors)
+					AIC_flat = AIC(nparams=0, data=sim_TTV_OminusC, model=np.linspace(0,0,len(sim_TTV_OminusC)), error=sim_TTV_errors)
+					AIC_curve = AIC(nparams=2, data=sim_TTV_OminusC, model=sinecurve(sim_TTV_epochs, *popt), error=sim_TTV_errors)					
+
+
 
 					### we want BIC_curve to be SMALLER THAN BIC_flat, despite the penalty, for the SINE MODEL TO HOLD WATER.
 					#### SO IF THAT'S THE CASE, AND WE DO BIC_curve - BIC_flat, then delta-BIC will be negative, which is what we want.
 					deltaBIC = BIC_curve - BIC_flat 
+					deltaAIC = AIC_curve - AIC_flat 
 
 					cv_best_periods.append(peak_power_period)
 					cv_deltaBICs.append(deltaBIC)
+					cv_deltaAICs.append(deltaAIC)
 
 
 				#### LOOK AT THE SWING ACROSS LSpowers_stack
@@ -403,12 +426,13 @@ try:
 
 
 				#### now compute the median and std for period fits, and the same for the deltaBIC
-				cv_best_periods, cv_deltaBICs = np.array(cv_best_periods), np.array(cv_deltaBICs)
+				cv_best_periods, cv_deltaBICs, cv_deltaAICs = np.array(cv_best_periods), np.array(cv_deltaBICs), np.array(cv_deltaAICs)
 				cv_period_skew, cv_period_kurtosis = skew(cv_best_periods), kurtosis(cv_best_periods)
 				cv_amplitudes, cv_phases = np.array(cv_amplitudes), np.array(cv_phases)
 				cv_best_period_median, cv_best_period_std = np.nanmedian(cv_best_periods), np.nanstd(cv_best_periods)
 				period_pct_error = cv_best_period_std / cv_best_period_median
 				cv_deltaBICs_median, cv_deltaBICs_std = np.nanmedian(cv_deltaBICs), np.nanstd(cv_deltaBICs)
+				cv_deltaAICs_median, cv_deltaAICs_std = np.nanmedian(cv_deltaAICs), np.nanstd(cv_deltaAICs)
 				cv_amplitude_median, cv_amplitude_std = np.nanmedian(cv_amplitudes), np.nanstd(cv_amplitudes)
 				amplitude_pct_error = cv_amplitude_std / cv_amplitude_median
 				cv_phase_median, cv_phase_std = np.nanmedian(cv_phases), np.nanstd(cv_phases)
@@ -424,6 +448,7 @@ try:
 				print('Phase = '+str(cv_phase_median)+' +/- '+str(cv_phase_std))
 				print('Phase pct error = ', str(phase_pct_error*100))
 				print("deltaBIC = "+str(cv_deltaBICs_median)+' +/- '+str(cv_deltaBICs_std))
+				print('deltaAIC = '+str(cv_deltaAICs_median)+' +/- '+str(cv_deltaAICs_std))
 				print(' ')
 				sim_cv_PTTV_pcterr = period_pct_error
 				sim_cv_ATTV_pcterr = amplitude_pct_error
@@ -437,7 +462,7 @@ try:
 				#if cross_validate_LSPs == 'y':
 				crossval_resultsfile = open(cvpath, mode='a')
 				#crossval_resultsfile.write('KOI,n_crossval_trials,n_epochs,n_removed,PTTV_median,PTTV_std,PTTV_skew,PTTV_kurtosis,PTTV_pcterr,ATTV_median,ATTV_std,ATTV_pcterr,phase_median,phase_std,phase_pcterr,deltaBIC,deltaBIC_std\n')
-				crossval_resultsfile.write(str(sim)+','+str(cv_ntrials_this_time)+','+str(len(sim_TTV_epochs))+','+str(ntoremove)+','+str(cv_best_period_median)+','+str(cv_best_period_std)+','+str(cv_period_skew)+','+str(cv_period_kurtosis)+','+str(period_pct_error*100)+','+str(cv_amplitude_median)+','+str(cv_amplitude_std)+','+str(amplitude_pct_error*100)+','+str(cv_phase_median)+','+str(cv_phase_std)+','+str(phase_pct_error*100)+','+str(cv_deltaBICs_median)+','+str(cv_deltaBICs_std)+'\n')
+				crossval_resultsfile.write(str(sim)+','+str(cv_ntrials_this_time)+','+str(len(sim_TTV_epochs))+','+str(ntoremove)+','+str(cv_best_period_median)+','+str(cv_best_period_std)+','+str(cv_period_skew)+','+str(cv_period_kurtosis)+','+str(period_pct_error*100)+','+str(cv_amplitude_median)+','+str(cv_amplitude_std)+','+str(amplitude_pct_error*100)+','+str(cv_phase_median)+','+str(cv_phase_std)+','+str(phase_pct_error*100)+','+str(cv_deltaBICs_median)+','+str(cv_deltaBICs_std)+','+str(cv_deltaAICs_median)+','+str(cv_deltaAICs_std)+'\n')
 				crossval_resultsfile.close()			
 
 				print('FINISHED WITH SIM CROSS-VALIDATION.')
@@ -507,11 +532,14 @@ try:
 
 				BIC_flat = BIC(nparams=0, data=sim_TTV_OminusC, model=np.linspace(0,0,len(sim_TTV_OminusC)), error=sim_TTV_errors)
 				BIC_curve = BIC(nparams=2, data=sim_TTV_OminusC, model=sinewave(sim_TTV_epochs,*popt), error=sim_TTV_errors)
+				AIC_flat = AIC(nparams=0, data=sim_TTV_OminusC, model=np.linspace(0,0,len(sim_TTV_OminusC)), error=sim_TTV_errors)
+				AIC_curve = AIC(nparams=2, data=sim_TTV_OminusC, model=sinewave(sim_TTV_epochs,*popt), error=sim_TTV_errors)				
 
 				#### we want Delta-BIC to be negative to indicate an improvement!
 				###### Now, BIC_curve is an improvement over BIC_flat if BIC_curve < BIC_flat (even with extra complexity, the model is improved)
 				####### so let deltaBIC = BIC_curve - BIC_flat: if BIC_curve is indeed < BIC_flat, then deltaBIC will be negative. SO:
 				deltaBIC = BIC_curve - BIC_flat
+				deltaAIC = AIC_curve - AIC_flat 
 				#deltaBIC_list.append(deltaBIC) #### MOVED TO THE END -- SO THAT YOUR INDEXING IS OK!
 
 
@@ -606,7 +634,7 @@ try:
 			if plot_individual == 'n':
 				sim_obs_summary = open(projectdir+'/'+sim_prefix_+'simulated_observations.csv', mode='a')		
 				#sim_obs_summary.write('sim,Pplan_days,ntransits,	TTV_rmsamp_sec,TTVperiod_epochs,peak_power,fit_sineamp,deltaBIC,MEGNO,SPOCK_prob\n')
-				sim_obs_summary.write(str(sim)+','+str(sim_nmoons)+','+str(sim_Pplan_days)+','+str(sim_ntransits)+','+str(sim_TTV_rmsamp)+','+str(sim_TTVperiod_epochs)+','+str(peak_power)+','+str(popt[0])+','+str(deltaBIC)+','+str(sim_MEGNO)+','+str(sim_SPOCKprob)+'\n')
+				sim_obs_summary.write(str(sim)+','+str(sim_nmoons)+','+str(sim_Pplan_days)+','+str(sim_ntransits)+','+str(sim_TTV_rmsamp)+','+str(sim_TTVperiod_epochs)+','+str(peak_power)+','+str(popt[0])+','+str(deltaBIC)+','+str(deltaAIC)+','+str(sim_MEGNO)+','+str(sim_SPOCKprob)+'\n')
 				sim_obs_summary.close()
 
 
@@ -618,6 +646,7 @@ try:
 			except:
 				sim_cv_results_robust_bool.append(np.nan)
 			deltaBIC_list.append(deltaBIC) #### MOVED TO THE END -- SO THAT YOUR INDEXING IS OK!
+			deltaAIC_list.append(deltaAIC)
 			max_fractional_delta_rvals.append(maximum_fractional_delta_r)  ### MOVED TO THE END, TO KEEP LISTS EVEN
 			peak_power_periods_list.append(peak_power_period)
 			TTV_amplitudes.append(sinecurve_amplitude)
@@ -628,6 +657,7 @@ try:
 			Pplans_days.append(np.nan)
 			sim_cv_results_robust_bool.append(np.nan)
 			deltaBIC_list.append(np.nan)
+			deltaAIC_list.append(np.nan)
 			max_fractional_delta_rvals.append(np.nan) 
 			peak_power_periods_list.append(np.nan)
 			TTV_amplitudes.append(np.nan)
@@ -639,6 +669,7 @@ try:
 
 	#### MAKE THE LISTS INTO ARRAYS
 	deltaBIC_list = np.array(deltaBIC_list)
+	deltaAIC_list = np.array(deltaAIC_list)
 	peak_power_periods_list = np.array(peak_power_periods_list)
 	max_fractional_delta_rvals = np.array(max_fractional_delta_rvals)
 	Msats_over_Mps = np.array(Msats_over_Mps)
@@ -712,6 +743,10 @@ try:
 			nmoon_good_deltaBIC_idxs = np.intersect1d(np.where(nmoons == nmoon)[0], np.where(deltaBIC_list <= -2)[0])
 			nmoon_good_deltaBIC_and_stable_idxs = np.intersect1d(nmoon_stable_idxs, nmoon_good_deltaBIC_idxs)
 			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs] #### WANT TO SHOW ALL! NOT JUST GOOD.
+			nmoon_good_deltaAIC_idxs = np.intersect1d(np.where(nmoons == nmoon)[0], np.where(deltaAIC_list <= 0)[0]) #### don't know a good cut-off for AIC, just use negative (improvement)
+			nmoon_good_deltaAIC_and_stable_idxs = np.intersect1d(nmoon_stable_idxs, nmoon_good_deltaAIC_idxs)
+			nmoon_deltaAICs = deltaAIC_list[nmoon_stable_idxs] #### WANT TO SHOW ALL! NOT JUST GOOD.			
+
 
 			violin_data[moonidx] = nmoon_deltaBICs
 			print('nmoon = ', nmoon)
@@ -722,6 +757,11 @@ try:
 			print('pct w/ good deltaBIC: ', (len(np.where(nmoon_deltaBICs <= -2)[0]) / len(nmoon_idxs))*100)
 			print('number stable AND good deltaBIC: ', len(nmoon_good_deltaBIC_and_stable_idxs))
 			print('pct stable AND good deltaBIC: ', (len(nmoon_good_deltaBIC_and_stable_idxs) / len(nmoon_idxs))*100)
+			print('number w/ good deltaAIC: ', len(np.where(nmoon_deltaAICs <= 0)[0]))
+			print('pct w/ good deltaAIC: ', (len(np.where(nmoon_deltaAICs <= 0)[0]) / len(nmoon_idxs))*100)
+			print('number stable AND good deltaAIC: ', len(nmoon_good_deltaAIC_and_stable_idxs))
+			print('pct stable AND good deltaAIC: ', (len(nmoon_good_deltaAIC_and_stable_idxs) / len(nmoon_idxs))*100)
+
 			print(' ')
 		#create_violin(data, data_labels=None, x_label=None, y_label=None, plot_title=None, colormap='viridis')
 		create_violin(violin_data, data_labels=['1', '2', '3', '4','5'], x_label='# moons', y_label=r'$\Delta$ BIC', colormap='viridis', autoshow=False)
@@ -749,6 +789,12 @@ try:
 
 			nmoon_median_deltaBIC = np.nanmedian(nmoon_deltaBICs)
 
+			nmoon_deltaAICs = deltaAIC_list[nmoon_stable_idxs]
+			nmoon_good_deltaAIC_idxs = np.intersect1d(np.where(nmoons == nmoon)[0], np.where(deltaAIC_list <= 0)[0])
+			nmoon_good_deltaAIC_and_stable_idxs = np.intersect1d(nmoon_stable_idxs, nmoon_good_deltaAIC_idxs)
+
+			nmoon_median_deltaAIC = np.nanmedian(nmoon_deltaAICs)			
+
 			print('nmoon = ', nmoon)
 			print('total available: ', len(nmoon_idxs))
 			print('number stable: ', len(nmoon_stable_idxs))
@@ -757,6 +803,11 @@ try:
 			print('pct w/ good deltaBIC: ', (len(np.where(nmoon_deltaBICs <= -2)[0]) / len(nmoon_idxs))*100)
 			print('number stable AND good deltaBIC: ', len(nmoon_good_deltaBIC_and_stable_idxs))
 			print('pct stable AND good deltaBIC: ', (len(nmoon_good_deltaBIC_and_stable_idxs) / len(nmoon_idxs))*100)
+
+			print('number w/ good deltaAIC: ', len(np.where(nmoon_deltaAICs <= 0)[0]))
+			print('pct w/ good deltaAIC: ', (len(np.where(nmoon_deltaAICs <= 0)[0]) / len(nmoon_idxs))*100)
+			print('number stable AND good deltaAIC: ', len(nmoon_good_deltaAIC_and_stable_idxs))
+			print('pct stable AND good deltaAIC: ', (len(nmoon_good_deltaAIC_and_stable_idxs) / len(nmoon_idxs))*100)			
 			print(' ')
 			axn,axb,axe = ax[moonidx].hist(nmoon_deltaBICs, bins=nmoon_x2_histbins, facecolor=colors[moonidx], alpha=0.7, edgecolor='k')
 			ax[moonidx].set_ylabel('N = '+str(nmoon))
@@ -807,6 +858,7 @@ try:
 			nmoon_idxs = np.where(nmoons == nmoon)[0]
 			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
 			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+			nmoon_deltaAICs = deltaAIC_list[nmoon_stable_idxs]
 			nmoon_periods = np.array(summaryfile['Pplan_days'])[nmoon_stable_idxs]
 			nmoon_transit_probs = scaled_transit_probabilities[nmoon_stable_idxs] #### we've just scaled these probabilities so that the closest in planet has transit probability of one.
 			##### DOING THIS TO INCREASE THE NUMBER OF SYSTEMS IN THE SAME -- NOT JUST THROWING AWAY A HUGE PERCENTAGE OF SYSTEMS WITH LOW TRANSIT PROBABILITIES.
@@ -832,7 +884,9 @@ try:
 				if ntp >= random_draw:
 					nmoon_final_idxs.append(nmidx)
 			nmoon_deltaBICs = deltaBIC_list[nmoon_final_idxs]
+			nmoon_deltaAICs = deltaAIC_list[nmoon_final_idxs]
 			nmoon_median_deltaBIC = np.nanmedian(nmoon_deltaBICs)
+			nmoon_median_deltaAIC = np.nanmedian(nmoon_deltaAICs)
 
 			axn,axb,axe = ax[moonidx].hist(nmoon_deltaBICs, bins=nmoon_x2_histbins, facecolor=colors[moonidx], alpha=0.7, edgecolor='k')
 			ax[moonidx].set_ylabel('N = '+str(nmoon))
@@ -853,6 +907,92 @@ try:
 		plt.show()
 	except:
 		print('could not produce the deltaBIC histogram plot.')	
+
+
+
+
+	####### DO THE SAME NOW WITH DELTA-AIC
+	try:
+		#### create five histograms of the deltaBICS -- WEIGHTED BY GEOMETRIC TRANSIT PROBABILITY!
+		colors = cm.get_cmap('viridis')(np.linspace(0,1,5))
+		color_idxs = np.linspace(0,1,5)
+		fig, ax = plt.subplots(5, sharex=True, figsize=(6,8))
+		nmoon_x2_histbins = np.linspace(-60,10,50)
+		
+		shortest_period_days = np.nanmin(np.array(summaryfile['Pplan_days']))
+		shortest_period_seconds = shortest_period_days * 24 * 60 * 60
+		shortest_period_idx = np.nanargmin(np.array(summaryfile['Pplan_days']))
+		shortest_period_mstar_kg = Mstars_kg[shortest_period_idx]
+		shortest_period_sma_meters = ((shortest_period_seconds**2 * G.value * shortest_period_mstar_kg) / (4*np.pi**2))**(1/3)
+
+
+		#inclusion_weight_denominators = np.array(summaryfile['Pplan_days'])/shortest_period
+		inclusion_weight_denominators = np.array(sim_smas_meters) / shortest_period_sma_meters
+		#### JUSTIFICATION: tan(theta) = Rstar / aplan approximately = Rstar / aplan. Twice the aplan, halve the theta, halve the transit probability.
+		#### WE'RE SCALING THESE PROBABILITIES SUCH THAT smallest sma has probability = 1. If you have twice the sma of this value, your inclusion probability will be 50%.
+		scaled_transit_probabilities = 1/inclusion_weight_denominators 
+
+
+
+		for moonidx, nmoon in enumerate(np.arange(1,6,1)):
+			nmoon_idxs = np.where(nmoons == nmoon)[0]
+			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
+			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+			nmoon_deltaAICs = deltaAIC_list[nmoon_stable_idxs]
+			nmoon_periods = np.array(summaryfile['Pplan_days'])[nmoon_stable_idxs]
+			nmoon_transit_probs = scaled_transit_probabilities[nmoon_stable_idxs] #### we've just scaled these probabilities so that the closest in planet has transit probability of one.
+			##### DOING THIS TO INCREASE THE NUMBER OF SYSTEMS IN THE SAME -- NOT JUST THROWING AWAY A HUGE PERCENTAGE OF SYSTEMS WITH LOW TRANSIT PROBABILITIES.
+			"""
+			try:
+				nmoon_sma_meters = sim_smas_meters[nmoon_stable_idxs]
+				nmoon_thetas = np.arctan(R_sun.value / nmoon_sma_meters)
+				nmoon_transit_prob = nmoon_thetas / (np.pi) #### the total angle is 2theta, divided by 2pi, simplifies.
+			except:
+				nmoon_transit_prob = inclusion_weights[nmoon_stable_idxs]
+			"""
+
+
+			#### LET MINIMUM PERIOD BE THE BASELINE (PROBABILITY = 1)
+			##### AT TWICE THAT PERIOD, INCLUSION PROBABILITY SHOULD BE 1/2.
+			##### SO IF WE DIVIDE EVERY PERIOD BY THE SHORTEST PERIOD, THAT IS THE DENOMINATOR IN THE WEIGHT FOR LIKELIHOOD OF INCLUSION.
+
+			nmoon_final_idxs = []
+			#for nmidx, nmiw in zip(nmoon_stable_idxs, nmoon_inclusion_weights):
+			for nmidx, ntp in zip(nmoon_stable_idxs, nmoon_transit_probs):
+				#### draw a random number -- if better than nmoon_inclusion weights, include it.
+				random_draw = np.random.random()
+				if ntp >= random_draw:
+					nmoon_final_idxs.append(nmidx)
+			nmoon_deltaBICs = deltaBIC_list[nmoon_final_idxs]
+			nmoon_deltaAICs = deltaAIC_list[nmoon_final_idxs]
+			nmoon_median_deltaBIC = np.nanmedian(nmoon_deltaBICs)
+			nmoon_median_deltaAIC = np.nanmedian(nmoon_deltaAICs)
+
+			axn,axb,axe = ax[moonidx].hist(nmoon_deltaAICs, bins=nmoon_x2_histbins, facecolor=colors[moonidx], alpha=0.7, edgecolor='k')
+			ax[moonidx].set_ylabel('N = '+str(nmoon))
+			ax[moonidx].plot(np.linspace(nmoon_median_deltaAIC, nmoon_median_deltaAIC, 100), np.linspace(0,1.05*np.nanmax(axn),100), c='r', linestyle='--', linewidth=2)
+			ax[moonidx].set_xlim(-40,10)
+			ax[moonidx].set_ylim(0,1.05*np.nanmax(axn))
+			ax[moonidx].set_rasterization_zorder(0)
+		ax[4].set_xlabel(r'$\Delta \, \mathrm{AIC}$')
+
+		plt.subplots_adjust(left=0.15, bottom=0.1, right=0.85, top=0.95, wspace=0.2, hspace=0.1)
+		if (sim_prefix == '') or (sim_prefix == '_'):
+			plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/LAST_RUN/variable_host_deltaAIC_histogram_geometric_transit_bias.pdf', dpi=300)			
+			plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/LAST_RUN/variable_host_deltaAIC_histogram_geometric_transit_bias.png', dpi=300)	
+		else:
+			plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/'+sim_prefix+'/deltaAIC_histogram_geometric_transit_bias.pdf', dpi=300)
+			plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/'+sim_prefix+'/deltaAIC_histogram_geometric_transit_bias.png', dpi=300)							
+
+		plt.show()
+	except:
+		print('could not produce the deltaAIC histogram plot.')		
+
+
+
+
+
+
 
 
 
@@ -978,6 +1118,7 @@ try:
 			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
 			nmoon_stable_idxs = np.intersect1d(nmoon_stable_idxs, good_PTTV_solution_idxs) #### purge all PTTV == 2.0
 			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+			nmoon_deltaAICs = deltaAIC_list[nmoon_stable_idxs]
 			nmoon_total_masses = Msats_over_Mps[nmoon_stable_idxs]
 
 			plt.scatter(nmoon_total_masses, nmoon_deltaBICs, facecolor=colors[moonidx], edgecolor='k', alpha=0.5, s=20, label='N = '+str(nmoon), zorder=0)
@@ -1002,6 +1143,50 @@ try:
 
 
 
+		###### DO THE SAME AS ABOVE, WITH DELTA-AIC.
+		colors = cm.get_cmap('viridis')(np.linspace(0,1,5))
+		color_idxs = np.linspace(0,1,5)
+
+		fig = plt.figure(figsize=(6,8))
+		ax = plt.subplot(111)
+
+		for moonidx, nmoon in enumerate(np.arange(1,6,1)):
+			nmoon_idxs = np.where(nmoons == nmoon)[0]
+			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
+			nmoon_stable_idxs = np.intersect1d(nmoon_stable_idxs, good_PTTV_solution_idxs) #### purge all PTTV == 2.0
+			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+			nmoon_deltaAICs = deltaAIC_list[nmoon_stable_idxs]
+			nmoon_total_masses = Msats_over_Mps[nmoon_stable_idxs]
+
+			plt.scatter(nmoon_total_masses, nmoon_deltaAICs, facecolor=colors[moonidx], edgecolor='k', alpha=0.5, s=20, label='N = '+str(nmoon), zorder=0)
+		plt.plot(np.logspace(-5,-2,100), np.linspace(-2,-2,100), c='r', alpha=0.5, linestyle='--', linewidth=3, zorder=5)
+
+		plt.xlabel(r'$(\Sigma \, M_S) / M_P$')
+		plt.xlim(1e-5,1e-2)
+		plt.ylim(-1000, 20)
+		plt.xscale('log')
+		#plt.yscale('log')
+		plt.ylabel(r'$\Delta$ AIC')
+		plt.legend(loc=3)
+		ax.set_rasterization_zorder(0)
+		plt.subplots_adjust(left=0.15, bottom=0.09, right=0.85, top=0.95, wspace=0.2, hspace=0.2)
+		if (sim_prefix == '') or (sim_prefix == '_'):
+			plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/LAST_RUN/variable_host_deltaAIC_vs_total_moon_mass.pdf', dpi=300)		
+			plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/LAST_RUN/variable_host_deltaAIC_vs_total_moon_mass.png', dpi=300)		
+		else:
+			plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/'+sim_prefix+'/deltaAIC_vs_total_moon_mass.pdf', dpi=300)
+			plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/'+sim_prefix+'/deltaAIC_vs_total_moon_mass.png', dpi=300)					
+		plt.show()
+
+
+
+
+
+
+
+
+
+
 
 		#### PLOT DeltaBIC as a function of # OF TRANSITS (proxy is one over period), color coded by nmoons
 		colors = cm.get_cmap('viridis')(np.linspace(0,1,5))
@@ -1015,6 +1200,7 @@ try:
 			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
 			nmoon_stable_idxs = np.intersect1d(nmoon_stable_idxs, good_PTTV_solution_idxs) 
 			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+			nmoon_deltaAICs = deltaAIC_list[nmoon_stable_idxs]
 			nmoon_total_masses = Msats_over_Mps[nmoon_stable_idxs]
 			nmoon_periods = np.array(summaryfile['Pplan_days'])[nmoon_stable_idxs]
 			nmoon_ntransits = np.floor(3650 / nmoon_periods)
@@ -1056,6 +1242,7 @@ try:
 			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
 			nmoon_stable_idxs = np.intersect1d(nmoon_stable_idxs, good_PTTV_solution_idxs) 
 			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+			nmoon_deltaAICs = deltaAIC_list[nmoon_stable_idxs]
 			nmoon_total_masses = Msats_over_Mps[nmoon_stable_idxs]
 			nmoon_periods = np.array(summaryfile['Pplan_days'])[nmoon_stable_idxs]
 			nmoon_ntransits = np.floor(3650 / nmoon_periods)
@@ -1102,6 +1289,7 @@ try:
 			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
 			nmoon_stable_idxs = np.intersect1d(nmoon_stable_idxs, good_PTTV_solution_idxs) 
 			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+			nmoon_deltaAICs = deltaAIC_list[nmoon_stable_idxs]
 			nmoon_total_masses = Msats_over_Mps[nmoon_stable_idxs]
 			nmoon_periods = np.array(summaryfile['Pplan_days'])[nmoon_stable_idxs]
 			nmoon_Tdurs = sim_Tdurs_hours[nmoon_stable_idxs]
@@ -1147,6 +1335,7 @@ try:
 			nmoon_stable_idxs = np.intersect1d(stable_idxs, nmoon_idxs)
 			nmoon_stable_idxs = np.intersect1d(nmoon_stable_idxs, good_PTTV_solution_idxs) 
 			nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
+			nmoon_deltaAICs = deltaAIC_list[nmoon_stable_idxs]
 			nmoon_total_masses = Msats_over_Mps[nmoon_stable_idxs]
 			nmoon_periods = np.array(summaryfile['Pplan_days'])[nmoon_stable_idxs]
 			nmoon_Tdurs = sim_Tdurs_hours[nmoon_stable_idxs]
@@ -1168,8 +1357,19 @@ try:
 
 
 		##### PLOT THE FRACTION OF DETECTABLE (deltaBIC <= -2) systems, as a function of mass
-		stable_detectable_idxs = np.intersect1d(stable_idxs, np.where(deltaBIC <= -2)[0])
-		stable_undetectable_idxs = np.intersect1d(stable_idxs, np.where(deltaBIC > -2)[0])
+		stable_detectable_BIC_idxs = np.intersect1d(stable_idxs, np.where(deltaBIC <= -2)[0])
+		stable_undetectable_BIC_idxs = np.intersect1d(stable_idxs, np.where(deltaBIC > -2)[0])
+		stable_detectable_AIC_idxs = np.intersect1d(stable_idxs, np.where(deltaAIC < 0)[0])
+		stable_undetectable_AIC_idxs = np.intersect1d(stable_idxs, np.where(deltaAIC >= 0)[0])		
+
+		if use_BIC_or_AIC.lower() == 'b':
+			stable_detectable_idxs = stable_detectable_BIC_idxs
+			stable_undetectable_idxs = stable_undetectable_BIC_idxs
+		else:
+			stable_detectable_idxs = stable_detectable_AIC_idxs
+			stable_undetectable_idxs = stable_undetectable_AIC_idxs			
+
+
 		#### make a histogram of stable and detectable
 		stable_detectable_histogram = plt.hist(Msats_over_Mps[stable_detectable_idxs], bins=np.logspace(-5,-2,20), facecolor='DodgerBlue', edgecolor='k', alpha=0.5)
 		plt.title('stable and detectable')
@@ -1304,12 +1504,20 @@ try:
 	for moon_number in np.arange(1,6,1):
 		nmoon_idxs = np.where(nmoons == moon_number)[0]
 		good_BIC_idxs = np.where(deltaBIC_list < -2)[0] #### positive evidence for a moon
+		good_AIC_idxs = np.where(deltaAIC_list < 0)[0]
 		nmoons_stable_idxs = np.intersect1d(nmoon_idxs, stable_idxs)
 		nmoons_stable_good_BIC_idxs = np.intersect1d(nmoons_stable_idxs, good_BIC_idxs)
+		nmoons_stable_good_AIC_idxs = np.intersect1d(nmoon_stable_idxs, good_AIC_idxs)
 		if len(cv_robust_idxs) > 0:
-			nmoons_final_sample_idxs = np.intersect1d(nmoons_stable_good_BIC_idxs, cv_robust_idxs)
+			if use_BIC_or_AIC.lower() == 'b':
+				nmoons_final_sample_idxs = np.intersect1d(nmoons_stable_good_BIC_idxs, cv_robust_idxs)
+			elif use_BIC_or_AIC.lower() == 'a':
+				nmoons_final_sample_idxs = np.intersect1d(nmoons_stable_good_AIC_idxs, cv_robust_idxs)
 		else:
-			nmoons_final_sample_idxs = nmoons_stable_good_BIC_idxs
+			if use_BIC_or_AIC.lower() == 'b':
+				nmoons_final_sample_idxs = nmoons_stable_good_BIC_idxs
+			else:
+				nmoons_final_sample_idxs = nmoons_stable_good_AIC_idxs				
 		TTV_period_bins = np.arange(2,20,1)
 
 
@@ -1319,7 +1527,8 @@ try:
 		print('# of these that are stable = ', len(nmoons_stable_idxs))
 		print('percent stable = ', len(nmoons_stable_idxs) / len(nmoon_idxs))
 		print('# stable with good BIC = ', len(nmoons_stable_good_BIC_idxs))
-		print('# stable, good BIC, robust cross-validation = ', len(nmoons_final_sample_idxs))
+		print('# stable with good AIC = ', len(nmoons_stable_good_AIC_idxs))		
+		print('# stable, good (A)(B)IC, robust cross-validation = ', len(nmoons_final_sample_idxs))
 		print(" ")
 		
 		histdict['hist'+str(moon_number)] = ax[moon_number-1].hist(peak_power_periods_list[nmoons_final_sample_idxs], bins=TTV_period_bins, facecolor=colors[moon_number-1], edgecolor='k')
@@ -1366,14 +1575,24 @@ try:
 	for moon_number in np.arange(1,6,1):
 		nmoon_idxs = np.where(nmoons == moon_number)[0]
 		good_BIC_idxs = np.where(deltaBIC_list < -2)[0] #### positive evidence for a moon
+		good_AIC_idxs = np.where(deltaAIC_list < 0)[0] #### positive evidence for a moon		
 		nmoons_stable_idxs = np.intersect1d(nmoon_idxs, stable_idxs)
-		nmoons_stable_good_BIC_idxs = np.intersect1d(nmoons_stable_idxs, good_BIC_idxs)
+		if use_BIC_or_AIC.lower() == 'b':
+			nmoons_stable_good_BIC_idxs = np.intersect1d(nmoons_stable_idxs, good_BIC_idxs)
+		else:
+			nmoons_stable_good_AIC_idxs = np.intersect1d(nmoons_stable_idxs, good_AIC_idxs)			
 
 
 		if len(cv_robust_idxs) > 0:
-			nmoons_final_sample_idxs = np.intersect1d(nmoons_stable_good_BIC_idxs, cv_robust_idxs)
+			if use_BIC_or_AIC.lower() == 'b':
+				nmoons_final_sample_idxs = np.intersect1d(nmoons_stable_good_BIC_idxs, cv_robust_idxs)
+			else:
+				nmoons_final_sample_idxs = np.intersect1d(nmoons_stable_good_AIC_idxs, cv_robust_idxs)				
 		else:
-			nmoons_final_sample_idxs = nmoons_stable_good_BIC_idxs
+			if use_BIC_or_AIC.lower() == 'b':
+				nmoons_final_sample_idxs = nmoons_stable_good_BIC_idxs
+			else:
+				nmoons_final_sample_idxs = nmoons_stable_good_AIC_idxs				
 
 		###### ADD GEOMETRIC BIAS
 		nmoon_transit_probs = scaled_transit_probabilities[nmoons_final_sample_idxs] #### we've just scaled these probabilities so that the closest in planet has transit probability of one.
@@ -1393,6 +1612,7 @@ try:
 		print('# of these that are stable = ', len(nmoons_stable_idxs))
 		print('percent stable = ', len(nmoons_stable_idxs) / len(nmoon_idxs))
 		print('# stable with good BIC = ', len(nmoons_stable_good_BIC_idxs))
+		print('# stable with good AIC = ', len(nmoons_stable_good_AIC_idxs))		
 		print('# stable, good BIC, robust cross-validation = ', len(nmoons_final_sample_idxs))
 		print(" ")
 		
@@ -1447,8 +1667,13 @@ try:
 	#### GENERATE THE SAME PLOT, BUT WITH A GAUSSIAN KERNEL DENSITY ESTIMATOR (COMPARE TO RESULTS FROM "real_planet_TTV_analyzer.py")
 	
 	good_BIC_stable_idxs = np.intersect1d(good_BIC_idxs, stable_idxs)
-	P_plans = np.array(summaryfile['Pplan_days'])[good_BIC_stable_idxs]
-	P_TTVs = peak_power_periods_list[good_BIC_stable_idxs]
+	good_AIC_stable_idxs = np.intersect1d(good_AIC_idxs, stable_idxs)
+	if use_BIC_or_AIC.lower() == 'b':	
+		P_plans = np.array(summaryfile['Pplan_days'])[good_BIC_stable_idxs]
+		P_TTVs = peak_power_periods_list[good_BIC_stable_idxs]
+	else:
+		P_plans = np.array(summaryfile['Pplan_days'])[good_AIC_stable_idxs]
+		P_TTVs = peak_power_periods_list[good_AIC_stable_idxs]		
 	kdestack = np.vstack((P_plans, P_TTVs))
 
 
@@ -1622,15 +1847,21 @@ try:
 	TTV_amplitudes_minutes = TTV_amplitudes / 60
 	#### SAVE THIS STUFF
 	np.save(projectdir+'/'+sim_prefix_+'sim_deltaBIC_list.npy', deltaBIC_list[good_BIC_stable_idxs])
+	np.save(projectdir+'/'+sim_prefix_+'sim_deltaAIC_list.npy', deltaAIC_list[good_AIC_stable_idxs])	
 	np.save(projectdir+'/'+sim_prefix_+'sim_PTTVs.npy', P_TTVs) #### these have already been culled as good_BIC_stable_idxs
 	np.save(projectdir+'/'+sim_prefix_+'sim_Pplans.npy', P_plans)
-	np.save(projectdir+'/'+sim_prefix_+'sim_TTV_amplitudes.npy', TTV_amplitudes[good_BIC_stable_idxs]) #### these need culling as such.
+	if use_BIC_or_AIC.lower() == 'b':
+		np.save(projectdir+'/'+sim_prefix_+'sim_TTV_amplitudes.npy', TTV_amplitudes[good_BIC_stable_idxs]) #### these need culling as such.
+	else:
+		np.save(projectdir+'/'+sim_prefix_+'sim_TTV_amplitudes.npy', TTV_amplitudes[good_AIC_stable_idxs]) #### these need culling as such.		
 	#P_plans = np.array(summaryfile['Pplan_days'])[good_BIC_stable_idxs]
 	#P_TTVs = peak_power_periods_list[good_BIC_stable_idxs]
 
 
-
-	detectable_idxs = np.where(deltaBIC_list <= -2)[0]
+	if use_BIC_or_AIC.lower() == 'b':
+		detectable_idxs = np.where(deltaBIC_list <= -2)[0]
+	else:
+		detectable_idxs = np.where(deltaAIC_list <= 0)[0]		
 	P_TTVs = peak_power_periods_list
 	#### final statistics:
 	for nmoon in np.arange(1,6,1):
@@ -1667,14 +1898,21 @@ try:
 		nmoon_stable_idxs = np.intersect1d(original_stable_idxs, nmoon_idxs)
 		nmoon_deltaBICs = deltaBIC_list[nmoon_stable_idxs]
 		nmoon_good_deltaBIC_idxs = np.intersect1d(np.where(nmoons == nmoon)[0], np.where(deltaBIC_list <= -2)[0])
+		nmoon_deltaAICs = deltaAIC_list[nmoon_stable_idxs]
+		nmoon_good_deltaAIC_idxs = np.intersect1d(np.where(nmoons == nmoon)[0], np.where(deltaAIC_list < 0)[0])		
 		nmoon_robust_idxs = np.intersect1d(np.where(nmoons == nmoon)[0], np.where(sim_cv_results_robust_bool == True)[0])
 
 
 
 		nmoon_good_deltaBIC_and_stable_idxs = np.intersect1d(nmoon_stable_idxs, nmoon_good_deltaBIC_idxs)
 		nmoon_good_deltaBIC_stable_and_robust_idxs = np.intersect1d(nmoon_good_deltaBIC_and_stable_idxs, nmoon_robust_idxs)
+		nmoon_good_deltaAIC_and_stable_idxs = np.intersect1d(nmoon_stable_idxs, nmoon_good_deltaAIC_idxs)
+		nmoon_good_deltaAIC_stable_and_robust_idxs = np.intersect1d(nmoon_good_deltaAIC_and_stable_idxs, nmoon_robust_idxs)
 
-		nmoon_final_idxs = nmoon_good_deltaBIC_stable_and_robust_idxs 
+		if use_BIC_or_AIC.lower() == 'b':
+			nmoon_final_idxs = nmoon_good_deltaBIC_stable_and_robust_idxs 
+		else:
+			nmoon_final_idxs = nmoon_good_deltaAIC_stable_and_robust_idxs 			
 		
 		nmoon_median_PTTV = np.nanmedian(P_TTVs[nmoon_final_idxs])
 		nmoon_PTTV_159 = np.nanpercentile(P_TTVs[nmoon_final_idxs], 15.9)
@@ -1702,9 +1940,20 @@ try:
 		print('pct w/ good deltaBIC: ', (len(np.where(nmoon_deltaBICs <= -2)[0]) / len(nmoon_idxs))*100)
 		print('number stable AND good deltaBIC: ', len(nmoon_good_deltaBIC_and_stable_idxs))
 		print('pct stable AND good deltaBIC: ', (len(nmoon_good_deltaBIC_and_stable_idxs) / len(nmoon_idxs))*100)
+		
+		print('number w/ good deltaAIC: ', len(np.where(nmoon_deltaAICs < 0 )[0]))
+		print('pct w/ good deltaAIC: ', (len(np.where(nmoon_deltaAICs < 0)[0]) / len(nmoon_idxs))*100)
+		print('number stable AND good deltaAIC: ', len(nmoon_good_deltaAIC_and_stable_idxs))
+		print('pct stable AND good deltaAIC: ', (len(nmoon_good_deltaAIC_and_stable_idxs) / len(nmoon_idxs))*100)
+
 		print('number robust: ', len(nmoon_robust_idxs))
-		print('number, stable, detectable, robust = ', len(nmoon_good_deltaBIC_stable_and_robust_idxs))
-		print('pct stable, detectable, robust = ', (len(nmoon_good_deltaBIC_stable_and_robust_idxs) / len(nmoon_idxs))*100)
+
+		print('number, stable, detectable, robust (BIC) = ', len(nmoon_good_deltaBIC_stable_and_robust_idxs))
+		print('pct stable, detectable, robust (BIC) = ', (len(nmoon_good_deltaBIC_stable_and_robust_idxs) / len(nmoon_idxs))*100)
+
+		print('number, stable, detectable, robust (AIC) = ', len(nmoon_good_deltaAIC_stable_and_robust_idxs))
+		print('pct stable, detectable, robust (AIC) = ', (len(nmoon_good_deltaAIC_stable_and_robust_idxs) / len(nmoon_idxs))*100)	
+			
 		print("PTTV = $"+str(round(nmoon_median_PTTV,2))+'\,^{+'+str(round(nmoon_PTTV_pm[0],2))+'}_{-'+str(round(nmoon_PTTV_pm[1],2))+'}$')
 		print("ATTV = $"+str(round(nmoon_median_ATTV,2))+'\,^{+'+str(round(nmoon_ATTV_pm[0],2))+'}_{-'+str(round(nmoon_ATTV_pm[1],2))+'}$')
 		print("MsMp = $"+str(round(nmoon_median_MsMp,6))+'\,^{+'+str(round(nmoon_MsMp_pm[0],6))+'}_{-'+str(round(nmoon_MsMp_pm[1],6))+'}$')		

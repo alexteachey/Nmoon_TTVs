@@ -37,9 +37,25 @@ from scipy.stats import skew, kurtosis
 
 """
 
+
+
+def sinewave(tvals, frequency, offset):
+	return amplitude * np.sin(2*np.pi*frequency*tvals + offset)
+
+def chisquare(data,model,error):
+	return np.nansum(((data-model)**2 / (error**2)))
+
+def BIC(nparams,data,model,error):
+	return nparams*np.log(len(data)) + chisquare(data,model,error)
+
+def AIC(nparams,data,model,error):
+	return 2*nparams + chisquare(data,model,error)	
+
+
 plt.rcParams["font.family"] = 'serif'
 
 sim_prefix = input('What is the sim_prefix? ')
+use_BIC_or_AIC = input("Do you want to use 'B'IC or 'A'IC? ")
 
 ####### FILE DIRECTORY INFORMATION
 if socket.gethostname() == 'tethys.asiaa.sinica.edu.tw':
@@ -327,21 +343,33 @@ try:
 	except:
 		loaded_TKS_crossvalfile = 'n'
 
+	#try:
+	#### LOAD THE CROSS-VALIDATION RESULTS (SIMULATIONS) #############################
 	try:
-		#### LOAD THE CROSS-VALIDATION RESULTS (SIMULATIONS) #############################
-		sim_crossvalfile = pandas.read_csv('/data/tethys/Documents/Projects/NMoon_TTVs/sim_PTTV_results.csv')
-		sim_cv_KOI = np.array(sim_crossvalfile['sim']).astype(str) #### of the form 1.01
-		sim_cv_PTTV_pcterr = np.array(sim_crossvalfile['PTTV_pcterr']).astype(float)
-		sim_cv_ATTV_pcterr = np.array(sim_crossvalfile['ATTV_pcterr']).astype(float)
-		sim_cv_phase_pcterr = np.array(sim_crossvalfile['phase_pcterr']).astype(float)
-		sim_cv_good_idxs = []
-		for i in np.arange(0,len(sim_cv_KOI),1):
-			if (sim_cv_PTTV_pcterr[i] <= 5) and (sim_cv_ATTV_pcterr[i] <= 5) and (sim_cv_phase_pcterr[i] <= 5):
-				sim_cv_good_idxs.append(i)
-		loaded_sim_crossvalfile = 'y'
+		if sim_prefix == '':
+			sim_crossvalfile = pandas.read_csv('/data/tethys/Documents/Projects/NMoon_TTVs/sim_PTTV_results.csv')
+		else:
+			sim_crossvalfile = pandas.read_csv('/data/tethys/Documents/Projects/NMoon_TTVs/'+sim_prefix+'sim_PTTV_results.csv')
 
 	except:
-		loaded_sim_crossvalfile = 'n'
+		if sim_prefix == '':
+			sim_crossvalfile = pandas.read_csv('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_PTTV_results.csv')
+		else:
+			sim_crossvalfile = pandas.read_csv('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/'+sim_prefix+'sim_PTTV_results.csv')
+
+
+	sim_cv_KOI = np.array(sim_crossvalfile['sim']).astype(str) #### of the form 1.01
+	sim_cv_PTTV_pcterr = np.array(sim_crossvalfile['PTTV_pcterr']).astype(float)
+	sim_cv_ATTV_pcterr = np.array(sim_crossvalfile['ATTV_pcterr']).astype(float)
+	sim_cv_phase_pcterr = np.array(sim_crossvalfile['phase_pcterr']).astype(float)
+	sim_cv_good_idxs = []
+	for i in np.arange(0,len(sim_cv_KOI),1):
+		if (sim_cv_PTTV_pcterr[i] <= 5) and (sim_cv_ATTV_pcterr[i] <= 5) and (sim_cv_phase_pcterr[i] <= 5):
+			sim_cv_good_idxs.append(i)
+	loaded_sim_crossvalfile = 'y'
+
+	#except:
+	#	loaded_sim_crossvalfile = 'n'
 
 
 
@@ -402,13 +430,15 @@ try:
 	P_TTVs = []
 	P_plans = []
 	deltaBICs = []
+	deltaAICs = []
 	Pip1_over_Pis = []
 	Pi_over_Pim1s = []
 	forecast_masses = []
 	forecast_masses_uperr = []
 	forecast_masses_lowerr = []
 
-	TTV_amplitudes = []
+	TTV_amplitudes_min = []
+	median_timing_errors = []
 	single_idxs = []
 	multi_idxs = []
 	in_HLcatalog_idxs = []
@@ -428,16 +458,17 @@ try:
 		PTTV_resultsname = 'GOSE_PTTV_results.csv'
 
 	if cross_validate_LSPs == 'y':
-		if os.path.exists('/data/tethys/Documents/Projects/NMoon_TTVs/'+PTTV_resultsname):
-			### find last record KOI number:
-			crossvalfile = pandas.read_csv('/data/tethys/Documents/Projects/NMoon_TTVs/'+PTTV_resultsname)
-			cv_kepois_examined = np.array(crossvalfile['KOI']).astype(str)
+		#if os.path.exists('/data/tethys/Documents/Projects/NMoon_TTVs/'+PTTV_resultsname):
+		### find last record KOI number:
+		#crossvalfile = pandas.read_csv('/data/tethys/Documents/Projects/NMoon_TTVs/'+PTTV_resultsname)
+		#cv_kepois_examined = np.array(crossvalfile['KOI']).astype(str)
 
-		else:
-			crossval_resultsfile = open('/data/tethys/Documents/Projects/NMoon_TTVs/'+PTTV_resultsname, mode='w')
-			crossval_resultsfile.write('KOI,n_crossval_trials,n_epochs,n_removed,PTTV_median,PTTV_std,PTTV_skew,PTTV_kurtosis,PTTV_pcterr,ATTV_median,ATTV_std,ATTV_pcterr,phase_median,phase_std,phase_pcterr,deltaBIC,deltaBIC_std\n')
-			crossval_resultsfile.close()
-			cv_kepois_examined = np.array([])
+		#else:
+		##### DO IT FRESSSSSSHHHHHHH !!!!!!!! 
+		crossval_resultsfile = open('/data/tethys/Documents/Projects/NMoon_TTVs/'+PTTV_resultsname, mode='w')
+		crossval_resultsfile.write('KOI,n_crossval_trials,n_epochs,n_removed,PTTV_median,PTTV_std,PTTV_skew,PTTV_kurtosis,PTTV_pcterr,ATTV_median,ATTV_std,ATTV_pcterr,phase_median,phase_std,phase_pcterr,deltaBIC,deltaBIC_std,deltaAIC,deltaAIC_std\n')
+		crossval_resultsfile.close()
+		cv_kepois_examined = np.array([])
 
 	else:
 		cv_kepois_examined = np.array([])
@@ -503,24 +534,24 @@ try:
 				#### it's not in the catalog! Continue!
 				continue
 
-			KOI_epochs, KOI_OCs, KOI_OCerrs = np.array(epochs[KOI_idxs]).astype(int), np.array(OCmin[KOI_idxs]).astype(float), np.array(OCmin_err[KOI_idxs]).astype(float)
-			KOI_rms = np.sqrt(np.nanmean(KOI_OCs**2))
+			KOI_epochs, KOI_OCmins, KOI_OCerrs = np.array(epochs[KOI_idxs]).astype(int), np.array(OCmin[KOI_idxs]).astype(float), np.array(OCmin_err[KOI_idxs]).astype(float)
+			KOI_rms = np.sqrt(np.nanmean(KOI_OCmins**2))
 			orig_KOI_rms = KOI_rms
 
 
 			##### OUTLIER REJECTION #########################################################
-			DBSCAN_vector = np.vstack((KOI_epochs, KOI_OCs)).T 
-			db = DBSCAN(eps=5*np.nanmedian(KOI_OCerrs), min_samples=int(len(KOI_epochs)/5)).fit(KOI_OCs.reshape(-1,1))			
+			DBSCAN_vector = np.vstack((KOI_epochs, KOI_OCmins)).T 
+			db = DBSCAN(eps=5*np.nanmedian(KOI_OCerrs), min_samples=int(len(KOI_epochs)/5)).fit(KOI_OCmins.reshape(-1,1))			
 			labels = db.labels_ 
 			outlier_idxs = np.where(labels == -1)[0]
-			KOI_epochs, KOI_OCs, KOI_OCerrs = np.delete(KOI_epochs, outlier_idxs), np.delete(KOI_OCs, outlier_idxs), np.delete(KOI_OCerrs, outlier_idxs)
-			KOI_rms = np.sqrt(np.nanmean(KOI_OCs**2))
+			KOI_epochs, KOI_OCmins, KOI_OCerrs = np.delete(KOI_epochs, outlier_idxs), np.delete(KOI_OCmins, outlier_idxs), np.delete(KOI_OCerrs, outlier_idxs)
+			KOI_rms = np.sqrt(np.nanmean(KOI_OCmins**2))
 
 
 			##### PERFORM A LOMB-SCARGLE PERIODOGRAM ON THE ENTIRE SAMPLE OF TRANSIT TIMES ########################
 			LSperiods = np.logspace(np.log10(2), np.log10(500), 5000)
 			LSfreqs = 1/LSperiods
-			LSpowers = LombScargle(KOI_epochs, KOI_OCs, KOI_OCerrs).power(LSfreqs)
+			LSpowers = LombScargle(KOI_epochs, KOI_OCmins, KOI_OCerrs).power(LSfreqs)
 			peak_power_idx = np.nanargmax(LSpowers)
 			peak_power_period = LSperiods[peak_power_idx]
 			peak_power_freq = 1/peak_power_period
@@ -532,16 +563,22 @@ try:
 				return sinewave
 
 			#### NOW FIT THAT SUCKER
-			popt, pcov = curve_fit(sinecurve, KOI_epochs, KOI_OCs, sigma=KOI_OCerrs, bounds=([0, -2*np.pi], [20*KOI_rms, 2*np.pi]))
+			popt, pcov = curve_fit(sinecurve, KOI_epochs, KOI_OCmins, sigma=KOI_OCerrs, bounds=([0, -2*np.pi], [20*KOI_rms, 2*np.pi]))
 			
 			#### calculate BIC and deltaBIC -- USE ALL THE DATAPOINTS!
-			BIC_flat = chisquare(KOI_OCs, np.linspace(0,0,len(KOI_OCs)),KOI_OCerrs) #k = 2
-			BIC_curve = 2*np.log(len(KOI_OCs)) + chisquare(KOI_OCs, sinecurve(KOI_epochs, *popt), KOI_OCerrs)
+			#BIC_flat = chisquare(KOI_OCmins, np.linspace(0,0,len(KOI_OCmins)),KOI_OCerrs) #k = 2
+			#BIC_curve = 2*np.log(len(KOI_OCmins)) + chisquare(KOI_OCmins, sinecurve(KOI_epochs, *popt), KOI_OCerrs)
+			#BIC(nparams,data,model,error):
+			BIC_flat = BIC(nparams=0,data=KOI_OCmins,model=np.linspace(0,0,len(KOI_OCmins)),error=KOI_OCerrs) #k=0
+			BIC_curve = BIC(nparams=2, data=KOI_OCmins, model=sinecurve(KOI_epochs, *popt), error=KOI_OCerrs) # k = 2
+			AIC_flat = AIC(nparams=0,data=KOI_OCmins,model=np.linspace(0,0,len(KOI_OCmins)),error=KOI_OCerrs) #k=0
+			AIC_curve = AIC(nparams=2,data=KOI_OCmins,model=sinecurve(KOI_epochs, *popt), error=KOI_OCerrs) # k = 2			
+
+
 			### we want BIC_curve to be SMALLER THAN BIC_flat, despite the penalty, for the SINE MODEL TO HOLD WATER.
 			#### SO IF THAT'S THE CASE, AND WE DO BIC_curve - BIC_flat, then delta-BIC will be negative, which is what we want.
 			deltaBIC = BIC_curve - BIC_flat 
-
-
+			deltaAIC = AIC_curve - AIC_flat 
 
 
 			#### NOW WE'LL DO EXACTLY AS ABOVE, BUT WITH THE CROSS-VALIDATION REMOVALS.
@@ -549,6 +586,7 @@ try:
 				#### lists to be used for evaluating the robustness of the periodogram results.
 				cv_best_periods = []
 				cv_deltaBICs = []
+				cv_deltaAICs = []
 				cv_amplitudes = []
 				cv_phases = []
 				cv_popts = []
@@ -567,12 +605,12 @@ try:
 					else:
 						idxs_to_leave_out = np.random.randint(low=0, high=len(KOI_epochs), size=ntoremove)	
 					cv_KOI_epochs = np.delete(KOI_epochs, idxs_to_leave_out)
-					cv_KOI_OCs = np.delete(KOI_OCs, idxs_to_leave_out)
+					cv_KOI_OCmins = np.delete(KOI_OCmins, idxs_to_leave_out)
 					cv_KOI_OCerrs = np.delete(KOI_OCerrs, idxs_to_leave_out)
 
 					cv_LSperiods = np.logspace(np.log10(2), np.log10(500), 5000)
 					cv_LSfreqs = 1/cv_LSperiods
-					cv_LSpowers = LombScargle(cv_KOI_epochs, cv_KOI_OCs, cv_KOI_OCerrs).power(cv_LSfreqs)
+					cv_LSpowers = LombScargle(cv_KOI_epochs, cv_KOI_OCmins, cv_KOI_OCerrs).power(cv_LSfreqs)
 					cv_peak_power_idx = np.nanargmax(cv_LSpowers)
 					cv_peak_power_period = cv_LSperiods[cv_peak_power_idx]
 					cv_peak_power_freq = 1/cv_peak_power_period
@@ -590,27 +628,35 @@ try:
 
 
 					#### NOW FIT THAT SUCKER
-					cv_popt, cv_pcov = curve_fit(cv_sinecurve, cv_KOI_epochs, cv_KOI_OCs, sigma=cv_KOI_OCerrs, bounds=([0, -2*np.pi], [20*KOI_rms, 2*np.pi]))
+					cv_popt, cv_pcov = curve_fit(cv_sinecurve, cv_KOI_epochs, cv_KOI_OCmins, sigma=cv_KOI_OCerrs, bounds=([0, -2*np.pi], [20*KOI_rms, 2*np.pi]))
 					cv_popts.append(cv_popt)
 					cv_pcovs.append(cv_pcov)
 					cv_amplitudes.append(cv_popt[0])
 					cv_phases.append(cv_popt[1])
 					
 					#### calculate BIC and deltaBIC -- USE ALL THE DATAPOINTS!
-					cv_BIC_flat = chisquare(KOI_OCs, np.linspace(0,0,len(KOI_OCs)),KOI_OCerrs) #k = 2
-					cv_BIC_curve = 2*np.log(len(KOI_OCs)) + chisquare(KOI_OCs, sinecurve(KOI_epochs, *cv_popt), KOI_OCerrs)
+					#cv_BIC_flat = chisquare(KOI_OCmins, np.linspace(0,0,len(KOI_OCmins)),KOI_OCerrs) #k = 2
+					#cv_BIC_curve = 2*np.log(len(KOI_OCmins)) + chisquare(KOI_OCmins, sinecurve(KOI_epochs, *cv_popt), KOI_OCerrs)
+					cv_BIC_flat = BIC(nparams=0,data=KOI_OCmins,model=np.linspace(0,0,len(KOI_OCmins)),error=KOI_OCerrs)
+					cv_BIC_curve = BIC(nparams=2,data=KOI_OCmins,model=sinecurve(KOI_epochs, *cv_popt),error=KOI_OCerrs)
 					cv_deltaBIC = cv_BIC_curve - cv_BIC_flat 
+
+					cv_AIC_flat = AIC(nparams=0,data=KOI_OCmins,model=np.linspace(0,0,len(KOI_OCmins)),error=KOI_OCerrs)
+					cv_AIC_curve = AIC(nparams=2,data=KOI_OCmins,model=sinecurve(KOI_epochs, *cv_popt),error=KOI_OCerrs)
+					cv_deltaAIC = cv_AIC_curve - cv_AIC_flat 					
 
 					cv_best_periods.append(cv_peak_power_period)
 					cv_deltaBICs.append(cv_deltaBIC)
+					cv_deltaAICs.append(cv_deltaAIC)
 
 				#### now compute the median and std for period fits, and the same for the deltaBIC
-				cv_best_periods, cv_deltaBICs = np.array(cv_best_periods), np.array(cv_deltaBICs)
+				cv_best_periods, cv_deltaBICs, cv_deltaAICs = np.array(cv_best_periods), np.array(cv_deltaBICs), np.array(cv_deltaAICs)
 				cv_period_skew, cv_period_kurtosis = skew(cv_best_periods), kurtosis(cv_best_periods)
 				cv_amplitudes, cv_phases = np.array(cv_amplitudes), np.array(cv_phases)
 				cv_best_period_median, cv_best_period_std = np.nanmedian(cv_best_periods), np.nanstd(cv_best_periods)
 				cv_period_pct_error = cv_best_period_std / cv_best_period_median
 				cv_deltaBICs_median, cv_deltaBICs_std = np.nanmedian(cv_deltaBICs), np.nanstd(cv_deltaBICs)
+				cv_deltaAICs_median, cv_deltaAICs_std = np.nanmedian(cv_deltaAICs), np.nanstd(cv_deltaAICs)				
 				cv_amplitude_median, cv_amplitude_std = np.nanmedian(cv_amplitudes), np.nanstd(cv_amplitudes)
 				cv_amplitude_pct_error = cv_amplitude_std / cv_amplitude_median
 				cv_phase_median, cv_phase_std = np.nanmedian(cv_phases), np.nanstd(cv_phases)
@@ -625,19 +671,20 @@ try:
 				print('Phase = '+str(cv_phase_median)+' +/- '+str(cv_phase_std))
 				print('Phase pct error = ', str(cv_phase_pct_error*100))
 				print("deltaBIC = "+str(cv_deltaBICs_median)+' +/- '+str(cv_deltaBICs_std))
+				print("deltaAIC = "+str(cv_deltaAICs_median)+' +/- '+str(cv_deltaAICs_std))				
 				print(' ')
 
 				crossval_resultsfile = open('/data/tethys/Documents/Projects/NMoon_TTVs/'+PTTV_resultsname, mode='a')
 				#crossval_resultsfile.write('KOI,n_crossval_trials,n_epochs,n_removed,PTTV_median,PTTV_std,PTTV_skew,PTTV_kurtosis,PTTV_pcterr,ATTV_median,ATTV_std,ATTV_pcterr,phase_median,phase_std,phase_pcterr,deltaBIC,deltaBIC_std\n')
-				crossval_resultsfile.write(str(kepoi)+','+str(cv_ntrials_this_time)+','+str(len(KOI_epochs))+','+str(ntoremove)+','+str(cv_best_period_median)+','+str(cv_best_period_std)+','+str(cv_period_skew)+','+str(cv_period_kurtosis)+','+str(cv_period_pct_error*100)+','+str(cv_amplitude_median)+','+str(cv_amplitude_std)+','+str(cv_amplitude_pct_error*100)+','+str(cv_phase_median)+','+str(cv_phase_std)+','+str(cv_phase_pct_error*100)+','+str(cv_deltaBICs_median)+','+str(cv_deltaBICs_std)+'\n')
+				crossval_resultsfile.write(str(kepoi)+','+str(cv_ntrials_this_time)+','+str(len(KOI_epochs))+','+str(ntoremove)+','+str(cv_best_period_median)+','+str(cv_best_period_std)+','+str(cv_period_skew)+','+str(cv_period_kurtosis)+','+str(cv_period_pct_error*100)+','+str(cv_amplitude_median)+','+str(cv_amplitude_std)+','+str(cv_amplitude_pct_error*100)+','+str(cv_phase_median)+','+str(cv_phase_std)+','+str(cv_phase_pct_error*100)+','+str(cv_deltaBICs_median)+','+str(cv_deltaBICs_std)+','+str(cv_deltaAICs_median)+','+str(cv_deltaAICs_std)+'\n')
 				crossval_resultsfile.close()
 
 			if show_plots == 'y':
 				#### THIS IS THE FULL DATA FIT FROM ABOVE -- NO LEAVING OUT DATA.
 				KOI_epochs_interp = np.linspace(np.nanmin(KOI_epochs), np.nanmax(KOI_epochs), 1000)
 				KOI_TTV_interp = sinecurve(KOI_epochs_interp, *popt)
-				plt.scatter(KOI_epochs, KOI_OCs, facecolor='LightCoral', edgecolor='k', alpha=0.7, zorder=2)
-				plt.errorbar(KOI_epochs, KOI_OCs, yerr=KOI_OCerrs, ecolor='k', fmt='none', zorder=1, alpha=0.2)
+				plt.scatter(KOI_epochs, KOI_OCmins, facecolor='LightCoral', edgecolor='k', alpha=0.7, zorder=2)
+				plt.errorbar(KOI_epochs, KOI_OCmins, yerr=KOI_OCerrs, ecolor='k', fmt='none', zorder=1, alpha=0.2)
 				plt.plot(KOI_epochs_interp, KOI_TTV_interp, color='k', linestyle='--', linewidth=2, alpha=0.2)
 
 				if cross_validate_LSPs == 'y':
@@ -663,6 +710,7 @@ try:
 					good_cv = 'y'
 				else:
 					good_cv = 'n'
+
 			elif cross_validate_LSPs == 'n':
 				if use_Holczer_or_gose == 'h':
 					if (holczer_cv_period_pct_error <= 5) and (holczer_cv_amplitude_pct_error <= 5) and (holczer_cv_phase_pct_error <= 5):
@@ -679,9 +727,21 @@ try:
 
 			if deltaBIC <= -2:
 				print('GOOD delta-BIC.')
+			else:
+				print('BAD delta-BIC.')
+			if deltaAIC < 0:
+				print('GOOD delta-AIC.')
+			else:
+				print("BAD delta-AIC.')")
 			if good_cv == 'y':
 				print('Good cross-validation.')
-			if (deltaBIC <= -2) and (good_cv == 'y'):
+			else:
+				print('BAD cross-validation.')
+
+
+			#### FINAL SAMPLE 	
+			if ((use_BIC_or_AIC.lower() == 'b') and (deltaBIC <= -2) and (good_cv == 'y') and (peak_power_period != 2.0)) or ((use_BIC_or_AIC.lower() == 'a') and (deltaAIC < 0) and (good_cv == 'y') and (peak_power_period != 2)):
+				#if (deltaBIC <= -2) and (good_cv == 'y'):
 				print('including this system.')
 				radii.append(kepler_radius_rearth[nkepoi])
 				radii_errors.append(kepler_radius_rearth_err[nkepoi])
@@ -689,14 +749,20 @@ try:
 				stellar_masses_errors.append(kepler_solar_mass_err[nkepoi])
 				P_TTVs.append(peak_power_period)
 				P_plans.append(kepoi_period)
-				amplitude = np.nanmax(np.abs(BIC_curve))
-				TTV_amplitudes.append(amplitude)
+				#if use_BIC_or_AIC.lower() == 'b':
+				#amplitude = np.nanmax(np.abs(BIC_curve)) #### WTF WAS THIS?
+				#amplitude = np.nanmax(np.abs(sinecurve(KOI_epochs, *popt)))
+				amplitude = popt[0] ##### first parameter is amplitude
+
+				TTV_amplitudes_min.append(amplitude)
+				median_timing_errors.append(np.nanmedian(KOI_OCerrs))
 				Pip1_over_Pis.append(kepoi_multi_Pip1_over_Pis)
 				Pi_over_Pim1s.append(kepoi_multi_Pi_over_Pim1s)
 				forecast_masses.append(forecast_mass)
 				forecast_masses_uperr.append(forecast_mass_uperr)
 				forecast_masses_lowerr.append(forecast_mass_lowerr)
 				deltaBICs.append(deltaBIC)
+				deltaAICs.append(deltaAIC)
 				if 'KOI-'+kepoi in HL_KOIs:
 					in_HLcatalog_idxs.append(entrynum)
 				else:
@@ -753,7 +819,8 @@ try:
 	single_notHL_idxs = np.intersect1d(notin_HLcatalog_idxs, single_idxs)
 	multi_notHL_idxs = np.intersect1d(notin_HLcatalog_idxs, multi_idxs)
 	multi_HL_idxs = np.intersect1d(in_HLcatalog_idxs, multi_idxs) #### should be the same as in_HLcatalog_idxs
-	TTV_amplitudes = np.array(TTV_amplitudes)
+	TTV_amplitudes_min = np.array(TTV_amplitudes_min)
+	median_timing_errors = np.array(median_timing_errors)
 	forecast_masses, forecast_masses_uperr, forecast_masses_lowerr = np.array(forecast_masses), np.array(forecast_masses_uperr), np.array(forecast_masses_lowerr)
 	#### replace all forecast_masses == 0.0 with np.nan!
 	forecast_masses[np.where(forecast_masses == 0.0)[0]] = np.nan
@@ -769,6 +836,7 @@ try:
 	cv_ATTV_pcterrs = np.array(cv_ATTV_pcterrs)
 	cv_phase_pcterrs = np.array(cv_phase_pcterrs)
 	deltaBICs = np.array(deltaBICs)
+	deltaAICs = np.array(deltaAICs)
 
 
 	#### CUT BASED ON A BETTER THAN 5% ERROR ON PERIOD, AMPLITUDE AND PHASE ACROSS ALL SOLUTIONS.
@@ -782,13 +850,13 @@ try:
 
 	#### COMPUTE THE MINIMUM fraction of the Hill sphere.
 	fmin = np.vectorize(fmin)
-	fmins_vals = fmin(forecast_masses, stellar_masses_mearth.value, TTV_amplitudes, P_plans_minutes)
+	fmins_vals = fmin(forecast_masses, stellar_masses_mearth.value, TTV_amplitudes_min, P_plans_minutes)
 	fmins, fmin_vars = fmins_vals[0], fmins_vals[1:]
 	possible_moon_fmin_idxs = np.where(fmins < 1.0)[0]
 	impossible_moon_fmin_idxs = np.where(fmins >= 1.0)[0]
 	highest_mass = np.nanmax(forecast_masses)
 	normalized_masses = forecast_masses / highest_mass
-	amplitudes_div_masses = TTV_amplitudes / normalized_masses
+	amplitudes_div_masses = TTV_amplitudes_min / normalized_masses
 
 
 
@@ -801,6 +869,14 @@ try:
 	#########################################
 	## P L O T T I N G ######################
 	#########################################
+
+
+	##### NEW PLOT -- MARCH 2021 -- LOOK AT THE TTV AMPLITUDES AS A FUNCTION OF TIMING ERRORS
+	plt.scatter(median_timing_errors, TTV_amplitudes_min, facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.7)
+	plt.xlabel('Median Timing Error [seconds]')
+	plt.ylabel("Measured TTV amplitude [seconds]")
+	plt.show()
+
 
 
 	#### PLOT fmins vs P_plans for the multis in and not in the HL2017 catalog.
@@ -821,6 +897,8 @@ try:
 	plt.yscale('log')
 	plt.legend()
 	plt.subplots_adjust(left=0.125, bottom=0.09, right=0.9, top=0.95, wspace=0.2, hspace=0.2)
+	plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/min_frac_Rhill_vs_Pplan.pdf', dpi=300)
+	plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/min_frac_Rhill_vs_Pplan.png', dpi=300)
 	plt.show()
 
 
@@ -852,9 +930,9 @@ try:
 	####### PLOT ATTV vs Pplan for single and multis
 	fig = plt.figure(figsize=(6,8))
 	ax = plt.subplot(111)
-	plt.scatter(P_plans[notin_HLcatalog_single_idxs], TTV_amplitudes[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
-	plt.scatter(P_plans[notin_HLcatalog_multi_idxs], TTV_amplitudes[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
-	plt.scatter(P_plans[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
+	plt.scatter(P_plans[notin_HLcatalog_single_idxs], TTV_amplitudes_min[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
+	plt.scatter(P_plans[notin_HLcatalog_multi_idxs], TTV_amplitudes_min[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
+	plt.scatter(P_plans[in_HLcatalog_idxs], TTV_amplitudes_min[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
 	plt.xlabel(r'$P_{\mathrm{P}}$ [days]')
 	plt.ylabel('TTV amplitude [s]')
 	plt.yscale('log')
@@ -867,9 +945,9 @@ try:
 
 	######### PLOT ATTV vs PTTV for singles and multis
 	
-	plt.scatter(TTV_amplitudes[notin_HLcatalog_single_idxs], P_TTVs[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
-	plt.scatter(TTV_amplitudes[notin_HLcatalog_multi_idxs], P_TTVs[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
-	plt.scatter(TTV_amplitudes[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
+	plt.scatter(TTV_amplitudes_min[notin_HLcatalog_single_idxs], P_TTVs[notin_HLcatalog_single_idxs], facecolor='green', edgecolor='k', s=20, alpha=0.5, label='single non-HL2017')
+	plt.scatter(TTV_amplitudes_min[notin_HLcatalog_multi_idxs], P_TTVs[notin_HLcatalog_multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.5, label='multi non-HL2017')
+	plt.scatter(TTV_amplitudes_min[in_HLcatalog_idxs], P_TTVs[in_HLcatalog_idxs], facecolor='LightCoral', edgecolor='k', s=20, alpha=0.5, label='multi HL2017')
 	plt.ylabel(r'$P_{\mathrm{TTV}}$ [epochs]')
 	plt.xlabel('TTV amplitude [s]')
 	plt.yscale('log')
@@ -987,14 +1065,14 @@ try:
 	##### LOOK AT AMPLITUDE VS PTTV FOR HL2017 SOURCES and Non-HL2017 sources
 	"""
 	fig, (ax1, ax2) = plt.subplots(2, figsize=(6,12))
-	heatmap_single = ax1.hist2d(P_TTVs[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
-	ax1.scatter(P_TTVs[in_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	heatmap_single = ax1.hist2d(P_TTVs[in_HLcatalog_idxs], TTV_amplitudes_min[in_HLcatalog_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
+	ax1.scatter(P_TTVs[in_HLcatalog_idxs], TTV_amplitudes_min[in_HLcatalog_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
 	ax1.set_xscale('log')
 	#ax1.set_yscale('log')
 	ax1.set_ylabel(r'amplitude [minutes] (HL2017)')
 
-	heatmap_multi = ax2.hist2d(P_TTVs[notin_HLcatalog_idxs], TTV_amplitudes[notin_HLcatalog_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
-	ax2.scatter(P_TTVs[notin_HLcatalog_idxs], TTV_amplitudes[notin_HLcatalog_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	heatmap_multi = ax2.hist2d(P_TTVs[notin_HLcatalog_idxs], TTV_amplitudes_min[notin_HLcatalog_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
+	ax2.scatter(P_TTVs[notin_HLcatalog_idxs], TTV_amplitudes_min[notin_HLcatalog_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
 	ax2.set_xscale('log')
 	#ax2.set_yscale('log')
 	ax2.set_ylabel(r'amplitude [minutes] (non-HL2017)')
@@ -1011,14 +1089,14 @@ try:
 	"""
 	##### LOOK AT AMPLITUDE VS PTTV FOR SINGLES AND MULTIs
 	fig, (ax1, ax2) = plt.subplots(2, figsize=(6,12))
-	heatmap_single = ax1.hist2d(P_TTVs[single_idxs], TTV_amplitudes[single_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
-	ax1.scatter(P_TTVs[single_idxs], TTV_amplitudes[single_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	heatmap_single = ax1.hist2d(P_TTVs[single_idxs], TTV_amplitudes_min[single_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
+	ax1.scatter(P_TTVs[single_idxs], TTV_amplitudes_min[single_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
 	ax1.set_xscale('log')
 	#ax1.set_yscale('log')
 	ax1.set_ylabel(r'amplitude [minutes] (single)')
 
-	heatmap_multi = ax2.hist2d(P_TTVs[multi_idxs], TTV_amplitudes[multi_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
-	ax2.scatter(P_TTVs[multi_idxs], TTV_amplitudes[multi_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
+	heatmap_multi = ax2.hist2d(P_TTVs[multi_idxs], TTV_amplitudes_min[multi_idxs], bins=[ybins, np.arange(0,100,5)], cmap='coolwarm', density=False)[0]
+	ax2.scatter(P_TTVs[multi_idxs], TTV_amplitudes_min[multi_idxs], facecolor='w', edgecolor='k', s=5, alpha=0.3)
 	ax2.set_xscale('log')
 	#ax2.set_yscale('log')
 	ax2.set_ylabel(r'amplitude [minutes] (multi)')
@@ -1048,10 +1126,10 @@ try:
 
 	#### make straight-up histograms for HL2017 and non-HL20217 -- AMPLITUDES
 	fig, (ax1, ax2) = plt.subplots(2, sharex=True)
-	ax1.hist(TTV_amplitudes[in_HLcatalog_idxs], bins=ybins, facecolor='DodgerBlue', edgecolor='k', alpha=0.7)
+	ax1.hist(TTV_amplitudes_min[in_HLcatalog_idxs], bins=ybins, facecolor='DodgerBlue', edgecolor='k', alpha=0.7)
 	ax1.set_ylabel('HL2017')
 	ax1.set_xscale('log')
-	ax2.hist(TTV_amplitudes[notin_HLcatalog_idxs], bins=ybins, facecolor='LightCoral', edgecolor='k', alpha=0.7)
+	ax2.hist(TTV_amplitudes_min[notin_HLcatalog_idxs], bins=ybins, facecolor='LightCoral', edgecolor='k', alpha=0.7)
 	ax2.set_ylabel('non - HL2017')
 	ax2.set_xlabel(r'TTV amplitude [minutes]')
 	ax2.set_xscale('log')
@@ -1061,10 +1139,10 @@ try:
 
 	#### AMPLTIUDES -- singles vs multies
 	fig, (ax1, ax2) = plt.subplots(2, sharex=True)
-	ax1.hist(TTV_amplitudes[single_idxs], bins=ybins, facecolor='DodgerBlue', edgecolor='k', alpha=0.7)
+	ax1.hist(TTV_amplitudes_min[single_idxs], bins=ybins, facecolor='DodgerBlue', edgecolor='k', alpha=0.7)
 	ax1.set_ylabel('single')
 	ax1.set_xscale('log')
-	ax2.hist(TTV_amplitudes[multi_idxs], bins=ybins, facecolor='LightCoral', edgecolor='k', alpha=0.7)
+	ax2.hist(TTV_amplitudes_min[multi_idxs], bins=ybins, facecolor='LightCoral', edgecolor='k', alpha=0.7)
 	ax2.set_ylabel('multi')
 	ax2.set_xlabel(r'TTV amplitude [minutes]')
 	ax2.set_xscale('log')
@@ -1102,7 +1180,7 @@ try:
 	##### PLOT amplitude and PTTV as a function of the MULTI periods
 	"""
 	fig, (ax1, ax2) = plt.subplots(2, sharex=True, sharey=True)
-	ax1.scatter(kepoi_multi_Pip1_over_Pis[multi_idxs], TTV_amplitudes[multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.7)
+	ax1.scatter(kepoi_multi_Pip1_over_Pis[multi_idxs], TTV_amplitudes_min[multi_idxs], facecolor='DodgerBlue', edgecolor='k', s=20, alpha=0.7)
 	ax1.set_ylabel('TTV amplitude [minutes]')
 	ax1.set_xlabel(r'$P_{i+1} / P_i$ ')
 	ax1.set_xscale('log')
@@ -1135,11 +1213,13 @@ try:
 	try:
 		if sim_prefix == '':		
 			sim_deltaBIC_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_deltaBIC_list.npy')
+			sim_deltaAIC_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_deltaBIC_list.npy')
 			sim_PTTVs = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_PTTVs.npy')
 			sim_Pplans = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/sim_Pplans.npy')
 			sim_TTV_amplitudes = np.load('/data/tethys/Dcuments/Projects/NMoon_TTVs/sim_TTV_amplitudes.npy')
 		else:
 			sim_deltaBIC_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/'+sim_prefix+'_sim_deltaBIC_list.npy')
+			sim_deltaAIC_list = np.load('/data/tethys/Documents/Projects/NMoon_TTVS/'+sim_prefix+'_sim_deltaBIC_list.npy')
 			sim_PTTVs = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/'+sim_prefix+'_sim_PTTVs.npy')
 			sim_Pplans = np.load('/data/tethys/Documents/Projects/NMoon_TTVs/'+sim_prefix+'_sim_Pplans.npy')
 			sim_TTV_amplitudes = np.load('/data/tethys/Dcuments/Projects/NMoon_TTVs/'+sim_prefix+'_sim_TTV_amplitudes.npy')
@@ -1147,25 +1227,41 @@ try:
 
 	except:
 		if sim_prefix == '':
-			sim_deltaBIC_list = np.load(projectdir+'/sim_deltaBIC_list.npy')
 			sim_PTTVs = np.load(projectdir+'/sim_PTTVs.npy')
 			sim_Pplans = np.load(projectdir+'/sim_Pplans.npy')
 			sim_TTV_amplitudes = np.load(projectdir+'/sim_TTV_amplitudes.npy')
+			sim_deltaBIC_list = np.load(projectdir+'/sim_deltaBIC_list.npy')
+			try:
+				sim_deltaAIC_list = np.load(projectdir+'/sim_deltaAIC_list.npy')
+			except:
+				use_BIC_or_AIC = 'b'
+				sim_deltaAIC_list = np.linspace(np.nan, np.nan, len(sim_PTTVs))
+
 		else:
-			sim_deltaBIC_list = np.load(projectdir+'/'+sim_prefix+'_sim_deltaBIC_list.npy')
 			sim_PTTVs = np.load(projectdir+'/'+sim_prefix+'_sim_PTTVs.npy')
 			sim_Pplans = np.load(projectdir+'/'+sim_prefix+'_sim_Pplans.npy')
 			sim_TTV_amplitudes = np.load(projectdir+'/'+sim_prefix+'_sim_TTV_amplitudes.npy')
+			sim_deltaBIC_list = np.load(projectdir+'/'+sim_prefix+'_sim_deltaBIC_list.npy')
+			try:
+				sim_deltaAIC_list = np.load(projectdir+'/'+sim_prefix+'_sim_deltaAIC_list.npy')
+			except:
+				use_BIC_or_AIC = 'b'
+				sim_deltaAIC_list = np.linspace(np.nan, np.nan, len(sim_PTTVs))
+
 
 	#sim_PTTVs = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_PTTVs.npy')
 	#sim_Pplans = np.load('/run/media/amteachey/Auddy_Akiti/Teachey/Nmoon_TTVs/sim_Pplans.npy')
 
 	##### NOW GRAB AS MANY sim_PTTV_results as you can.
-	nsims = len(sim_deltaBIC_list)
+	if use_BIC_or_AIC.lower() == 'b':
+		nsims = len(sim_deltaBIC_list)
+	elif use_BIC_or_AIC.lower() == 'a':
+		nsims = len(sim_deltaAIC_list)
 	nsims_crossvaled = len(sim_cv_PTTV_pcterr)
 
 	if nsims_crossvaled < nsims:
 		sim_deltaBIC_list = sim_deltaBIC_list[:nsims_crossvaled]
+		sim_deltaAIC_list = sim_deltaAIC_list[:nsims_crossvaled]
 		sim_PTTVs = sim_PTTVs[:nsims_crossvaled]
 		sim_Pplans = sim_Pplans[:nsims_crossvaled]
 		sim_TTV_amplitudes = sim_TTV_amplitudes[:nsims_crossvaled]
@@ -1184,7 +1280,15 @@ try:
 	sim_cv_good_idxs = np.array(sim_cv_good_idxs)
 
 	#### SHOULD BE SAFE TO DO THIS -- WE'RE NOT PAIRING THEM UP WITH ANYTHING ELSE, SO MAKE THE CUT!
-	sim_deltaBIC_list = sim_deltaBIC_list[sim_cv_good_idxs]
+	try:
+		sim_deltaBIC_list = sim_deltaBIC_list[sim_cv_good_idxs]
+	except:
+		pass
+	try:
+		sim_deltaAIC_list = sim_deltaAIC_list[sim_cv_good_idxs]
+	except:
+		pass
+		
 	sim_PTTVs = sim_PTTVs[sim_cv_good_idxs]
 	try:
 		sim_TTV_amplitudes = sim_TTV_amplitudes[sim_cv_good_idxs]
@@ -1200,10 +1304,13 @@ try:
 	deltaBIC_lists = [sim_deltaBIC_list, deltaBICs[single_notHL_idxs], deltaBICs[multi_notHL_idxs], deltaBICs[multi_HL_idxs], deltaBICs[possible_moon_fmin_idxs], deltaBICs[impossible_moon_fmin_idxs]]
 	deltaBIC_bins = np.linspace(-100,-2,20)
 	
+	deltaAIC_lists = [sim_deltaAIC_list, deltaAICs[single_notHL_idxs], deltaAICs[multi_notHL_idxs], deltaAICs[multi_HL_idxs], deltaAICs[possible_moon_fmin_idxs], deltaAICs[impossible_moon_fmin_idxs]]
+	deltaAIC_bins = np.linspace(-100,-2,20)
+
 	PTTV_lists = [sim_PTTVs, P_TTVs[single_notHL_idxs], P_TTVs[multi_notHL_idxs], P_TTVs[multi_HL_idxs], P_TTVs[possible_moon_fmin_idxs], P_TTVs[impossible_moon_fmin_idxs]]
 	PTTV_bins = np.logspace(np.log10(2), np.log10(100), 20)
 	
-	TTVamp_lists = [sim_TTV_amplitudes_minutes, TTV_amplitudes[single_notHL_idxs], TTV_amplitudes[multi_notHL_idxs], TTV_amplitudes[multi_HL_idxs], TTV_amplitudes[possible_moon_fmin_idxs], TTV_amplitudes[impossible_moon_fmin_idxs]]
+	TTVamp_lists = [sim_TTV_amplitudes_minutes, TTV_amplitudes_min[single_notHL_idxs], TTV_amplitudes_min[multi_notHL_idxs], TTV_amplitudes_min[multi_HL_idxs], TTV_amplitudes_min[possible_moon_fmin_idxs], TTV_amplitudes_min[impossible_moon_fmin_idxs]]
 	TTVamp_bins = np.logspace(0,6,20)
 
 	#PTTV_over_Pplan_lists = [sim_PTTVs / sim_Pplans, P_TTVs[single_notHL_idxs]/P_plans[single_notHL_idxs], P_TTVs[multi_notHL_idxs]/P_plans[multi_notHL_idxs], P_TTVs[multi_HL_idxs] / P_plans[multi_HL_idxs]]
@@ -1215,9 +1322,16 @@ try:
 
 
 	row_labels = ['moon sims', 'singles', 'multis', 'HL2017', 'possible', 'impossible']
-	col_labels = [r'$P_{\mathrm{P}}$ [days]', r'$P_{\mathrm{TTV}}$ [epochs]', '$A_{\mathrm{TTV}}$ [min]', r'$\Delta$BIC']
-	column_list_of_lists = [Pplan_lists, PTTV_lists, TTVamp_lists, deltaBIC_lists]
-	bin_lists = [Pplan_bins, PTTV_bins, TTVamp_bins, deltaBIC_bins]
+	if use_BIC_or_AIC.lower() == 'b':
+		col_labels = [r'$P_{\mathrm{P}}$ [days]', r'$P_{\mathrm{TTV}}$ [epochs]', '$A_{\mathrm{TTV}}$ [min]', r'$\Delta$BIC']
+		column_list_of_lists = [Pplan_lists, PTTV_lists, TTVamp_lists, deltaBIC_lists]
+		bin_lists = [Pplan_bins, PTTV_bins, TTVamp_bins, deltaBIC_bins]
+	elif use_BIC_or_AIC.lower() == 'a':
+		col_labels = [r'$P_{\mathrm{P}}$ [days]', r'$P_{\mathrm{TTV}}$ [epochs]', '$A_{\mathrm{TTV}}$ [min]', r'$\Delta$AIC']
+		column_list_of_lists = [Pplan_lists, PTTV_lists, TTVamp_lists, deltaAIC_lists]
+		bin_lists = [Pplan_bins, PTTV_bins, TTVamp_bins, deltaAIC_bins]
+
+
 	axis_scales = ['log', 'log', 'log', 'linear']
 
 	colors = cm.viridis(np.linspace(0,1,len(bin_lists)))	
@@ -1256,8 +1370,10 @@ try:
                     top=0.95, 
                     wspace=0.5, 
                     hspace=0.15)
-
-	plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/histogram_6x4_real_planets.pdf', dpi=300)
+	if use_BIC_or_AIC.lower() == 'b':
+		plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/histogram_6x4_real_planets_wBIC.pdf', dpi=300)
+	else:
+		plt.savefig('/data/tethys/Documents/Projects/NMoon_TTVs/Plots/histogram_6x4_real_planets_wAIC.pdf', dpi=300)		
 
 	plt.show()
 
@@ -1272,8 +1388,8 @@ try:
 		ks_PTTV_multivsHL = kstest(P_TTVs[notin_HLcatalog_multi_idxs], P_TTVs[in_HLcatalog_idxs])
 		ks_Pplan_allvsHL = kstest(P_plans[notin_HLcatalog_idxs], P_plans[in_HLcatalog_idxs])
 		ks_Pplan_multivsHL = kstest(P_plans[notin_HLcatalog_multi_idxs], P_plans[in_HLcatalog_idxs])
-		ks_TTVamp_allvsHL = kstest(TTV_amplitudes[notin_HLcatalog_idxs], TTV_amplitudes[in_HLcatalog_idxs])
-		ks_TTVamp_multivsHL = kstest(TTV_amplitudes[notin_HLcatalog_multi_idxs], TTV_amplitudes[in_HLcatalog_idxs])
+		ks_TTVamp_allvsHL = kstest(TTV_amplitudes_min[notin_HLcatalog_idxs], TTV_amplitudes_min[in_HLcatalog_idxs])
+		ks_TTVamp_multivsHL = kstest(TTV_amplitudes_min[notin_HLcatalog_multi_idxs], TTV_amplitudes_min[in_HLcatalog_idxs])
 		#ks_forecast_masses_allvsHL = kstest(forecast_masses[notin_HLcatalog_idxs], forecast_masses[in_HLcatalog_idxs])
 		#ks_forecast_masses_multivsHL = kstest(forecast_masses[notin_HLcatalog_multi_idxs], forecast_masses[in_HLcatalog_idxs])
 		ks_radii_allvsHL = kstest(radii[notin_HLcatalog_idxs], radii[in_HLcatalog_idxs])
